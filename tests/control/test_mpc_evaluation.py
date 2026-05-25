@@ -107,7 +107,7 @@ class TestBuildOutdoorSeries:
         assert series == [DEFAULT_OUTDOOR_TEMP_FALLBACK] * 5
 
     def test_forecast_used_when_available(self):
-        """With forecast data, series uses forecast temperatures."""
+        """Block 0 = sensor, remaining blocks expand forecast[0] hourly entry."""
         hass = build_hass()
         room = make_room()
         model_mgr = RoomModelManager()
@@ -126,10 +126,11 @@ class TestBuildOutdoorSeries:
             has_external_sensor=True,
         )
         series = ctrl._build_outdoor_series(3)
-        assert series == [5.0, 6.0, 7.0]
+        # Block 0 = sensor; blocks 1-2 still within forecast[0]'s hour
+        assert series == [8.0, 5.0, 5.0]
 
     def test_forecast_padded_when_shorter_than_n_blocks(self):
-        """Forecast shorter than n_blocks should be padded with last forecast value."""
+        """Short forecast: last hourly entry is repeated for the remaining blocks."""
         hass = build_hass()
         room = make_room()
         model_mgr = RoomModelManager()
@@ -147,10 +148,11 @@ class TestBuildOutdoorSeries:
             has_external_sensor=True,
         )
         series = ctrl._build_outdoor_series(5)
-        assert series == [5.0, 6.0, 6.0, 6.0, 6.0]
+        # n_blocks=5 stays within forecast[0]'s hour after block 0 (sensor)
+        assert series == [8.0, 5.0, 5.0, 5.0, 5.0]
 
     def test_forecast_truncated_when_longer_than_n_blocks(self):
-        """Forecast longer than n_blocks should be truncated."""
+        """n_blocks smaller than one hourly slot stays within forecast[0]."""
         hass = build_hass()
         room = make_room()
         model_mgr = RoomModelManager()
@@ -171,10 +173,11 @@ class TestBuildOutdoorSeries:
             has_external_sensor=True,
         )
         series = ctrl._build_outdoor_series(3)
-        assert series == [5.0, 6.0, 7.0]
+        # n_blocks=3: block 0 sensor + 2 of forecast[0]; forecast[1..4] not reached
+        assert series == [10.0, 5.0, 5.0]
 
     def test_forecast_missing_temperature_key_uses_outdoor_temp(self):
-        """Forecast entries without 'temperature' key fall back to current outdoor_temp."""
+        """Forecast entry without 'temperature' falls back to outdoor_temp."""
         hass = build_hass()
         room = make_room()
         model_mgr = RoomModelManager()
@@ -193,10 +196,11 @@ class TestBuildOutdoorSeries:
             has_external_sensor=True,
         )
         series = ctrl._build_outdoor_series(3)
-        assert series == [5.0, 8.0, 7.0]
+        # n_blocks=3 stays within forecast[0]'s hour; block 0 = sensor
+        assert series == [8.0, 5.0, 5.0]
 
     def test_forecast_missing_temp_key_and_outdoor_none_uses_fallback(self):
-        """Forecast entry without temp + outdoor_temp=None uses DEFAULT_OUTDOOR_TEMP_FALLBACK."""
+        """Missing temperature + outdoor_temp=None falls back to DEFAULT for all blocks."""
         from custom_components.roommind.control.mpc_controller import DEFAULT_OUTDOOR_TEMP_FALLBACK
 
         hass = build_hass()
@@ -215,9 +219,83 @@ class TestBuildOutdoorSeries:
             has_external_sensor=True,
         )
         series = ctrl._build_outdoor_series(3)
-        assert series[0] == DEFAULT_OUTDOOR_TEMP_FALLBACK
-        # Padding should also use the fallback
+        # outdoor_temp None → block 0 is not overridden; whole hour uses fallback
         assert all(v == DEFAULT_OUTDOOR_TEMP_FALLBACK for v in series)
+
+    def test_block_zero_is_sensor_reading(self):
+        """Block 0 always uses the real-time sensor, not forecast[0]."""
+        hass = build_hass()
+        room = make_room()
+        model_mgr = RoomModelManager()
+        forecast = [{"temperature": 15.6}, {"temperature": 14.0}]
+        ctrl = MPCController(
+            hass,
+            room,
+            model_manager=model_mgr,
+            outdoor_temp=20.67,
+            outdoor_forecast=forecast,
+            settings={},
+            has_external_sensor=True,
+        )
+        series = ctrl._build_outdoor_series(6)
+        assert series == [20.67, 15.6, 15.6, 15.6, 15.6, 15.6]
+
+    def test_hourly_forecast_expanded_to_blocks(self):
+        """Each hourly forecast entry covers 60 // PLAN_DT_MINUTES blocks."""
+        hass = build_hass()
+        room = make_room()
+        model_mgr = RoomModelManager()
+        forecast = [{"temperature": 15.6}, {"temperature": 14.0}]
+        ctrl = MPCController(
+            hass,
+            room,
+            model_manager=model_mgr,
+            outdoor_temp=20.67,
+            outdoor_forecast=forecast,
+            settings={},
+            has_external_sensor=True,
+        )
+        series = ctrl._build_outdoor_series(24)
+        # First hour (blocks 0-11): sensor + 11 of forecast[0]
+        # Second hour (blocks 12-23): 12 of forecast[1]
+        assert series == [20.67] + [15.6] * 11 + [14.0] * 12
+
+    def test_outdoor_temp_none_uses_forecast_for_block_zero(self):
+        """When sensor reading is missing, block 0 falls back to forecast[0]."""
+        hass = build_hass()
+        room = make_room()
+        model_mgr = RoomModelManager()
+        forecast = [{"temperature": 12.3}]
+        ctrl = MPCController(
+            hass,
+            room,
+            model_manager=model_mgr,
+            outdoor_temp=None,
+            outdoor_forecast=forecast,
+            settings={},
+            has_external_sensor=True,
+        )
+        series = ctrl._build_outdoor_series(3)
+        assert series == [12.3, 12.3, 12.3]
+
+    def test_pad_with_last_value_when_forecast_exhausted(self):
+        """When n_blocks exceeds the forecast horizon, last value pads the tail."""
+        hass = build_hass()
+        room = make_room()
+        model_mgr = RoomModelManager()
+        forecast = [{"temperature": 5.0}, {"temperature": 6.0}]
+        ctrl = MPCController(
+            hass,
+            room,
+            model_manager=model_mgr,
+            outdoor_temp=8.0,
+            outdoor_forecast=forecast,
+            settings={},
+            has_external_sensor=True,
+        )
+        series = ctrl._build_outdoor_series(30)
+        # 1 sensor + 11 of forecast[0] + 12 of forecast[1] + 6 padding (= forecast[1])
+        assert series == [8.0] + [5.0] * 11 + [6.0] * 12 + [6.0] * 6
 
 
 # ---------------------------------------------------------------------------

@@ -21,17 +21,36 @@ from .thermal_model import RCModel, ThermalEKF
 
 
 def build_forecast_outdoor_series(
-    forecast: list[dict],
+    forecast: list[dict] | None,
     current_outdoor: float,
     n_blocks: int,
 ) -> list[float]:
-    """Build outdoor temperature series from weather forecast or fallback."""
-    if forecast:
-        series = [f.get("temperature", current_outdoor) for f in forecast]
-        while len(series) < n_blocks:
-            series.append(series[-1] if series else current_outdoor)
-        return series[:n_blocks]
-    return [current_outdoor] * n_blocks
+    """Build outdoor temperature series for analytics prediction.
+
+    Block 0 uses ``current_outdoor`` (real-time sensor reading). Subsequent
+    blocks expand each hourly forecast entry to ``60 // PLAN_DT_MINUTES`` blocks.
+    Padded with the last forecast value when the horizon exceeds the forecast.
+    """
+    if not forecast:
+        return [current_outdoor] * n_blocks
+
+    from .mpc_controller import PLAN_DT_MINUTES
+
+    blocks_per_hour = 60 // PLAN_DT_MINUTES
+
+    series: list[float] = []
+    for f in forecast:
+        temp = f.get("temperature", current_outdoor)
+        series.extend([temp] * blocks_per_hour)
+        if len(series) >= n_blocks:
+            break
+
+    series[0] = current_outdoor
+
+    while len(series) < n_blocks:
+        series.append(series[-1])
+
+    return series[:n_blocks]
 
 
 def build_forecast_solar_series(
@@ -43,16 +62,26 @@ def build_forecast_solar_series(
 ) -> list[float] | None:
     """Build solar series for analytics prediction from forecast cloud coverage.
 
-    Returns None if latitude/longitude are not available (clear-sky handled
-    inside solar module).
+    Expands hourly ``cloud_coverage`` entries to ``60 // PLAN_DT_MINUTES`` blocks
+    before passing to the solar module, matching the MPC controller's solar
+    series construction. Returns None if latitude/longitude are not available.
     """
     if latitude == 0.0 and longitude == 0.0:
         return None
+    from .mpc_controller import PLAN_DT_MINUTES
     from .solar import build_solar_series
 
     cloud_series: list[float | None] | None = None
     if forecast:
-        cloud_series = [f.get("cloud_coverage") for f in forecast]
+        blocks_per_hour = 60 // PLAN_DT_MINUTES
+        expanded: list[float | None] = []
+        for f in forecast:
+            cc = f.get("cloud_coverage")
+            expanded.extend([cc] * blocks_per_hour)
+        cloud_series = expanded[:n_blocks]
+        while len(cloud_series) < n_blocks:
+            cloud_series.append(cloud_series[-1] if cloud_series else None)
+
     series = build_solar_series(latitude, longitude, n_blocks, 5.0, cloud_series=cloud_series)
     if series is not None and shading_factor != 1.0:
         series = [s * shading_factor for s in series]

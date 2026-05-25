@@ -107,14 +107,14 @@ class TestBuildForecastOutdoorSeries:
     """Tests for build_forecast_outdoor_series."""
 
     def test_with_forecast_data(self):
-        """Forecast entries used as-is."""
+        """Block 0 = current_outdoor, remaining blocks within forecast[0]'s hour."""
         forecast = [
             {"temperature": 5.0},
             {"temperature": 6.0},
             {"temperature": 7.0},
         ]
         result = build_forecast_outdoor_series(forecast, 10.0, 3)
-        assert result == [5.0, 6.0, 7.0]
+        assert result == [10.0, 5.0, 5.0]
 
     def test_without_forecast_fallback(self):
         """No forecast → constant current outdoor."""
@@ -122,29 +122,32 @@ class TestBuildForecastOutdoorSeries:
         assert result == [10.0] * 5
 
     def test_forecast_shorter_than_n_blocks_padded(self):
-        """Short forecast padded with last value."""
+        """Short forecast: last forecast value pads the tail past expansion."""
         forecast = [
             {"temperature": 5.0},
             {"temperature": 6.0},
         ]
         result = build_forecast_outdoor_series(forecast, 10.0, 5)
-        assert result == [5.0, 6.0, 6.0, 6.0, 6.0]
+        # n_blocks=5 stays within forecast[0]'s hour after block 0 (sensor)
+        assert result == [10.0, 5.0, 5.0, 5.0, 5.0]
 
     def test_forecast_longer_than_n_blocks_truncated(self):
-        """Longer forecast truncated to n_blocks."""
+        """n_blocks smaller than one hourly slot stays within forecast[0]."""
         forecast = [{"temperature": float(i)} for i in range(10)]
         result = build_forecast_outdoor_series(forecast, 10.0, 3)
-        assert result == [0.0, 1.0, 2.0]
+        # Block 0 = sensor; blocks 1-2 still within forecast[0]'s hour
+        assert result == [10.0, 0.0, 0.0]
 
     def test_missing_temperature_key_uses_current(self):
-        """Forecast entry without 'temperature' → uses current_outdoor."""
+        """Forecast entry without 'temperature' falls back to current_outdoor."""
         forecast = [
             {"temperature": 5.0},
             {"condition": "cloudy"},
             {"temperature": 7.0},
         ]
         result = build_forecast_outdoor_series(forecast, 10.0, 3)
-        assert result == [5.0, 10.0, 7.0]
+        # n_blocks=3 stays within forecast[0]'s hour; block 0 = current_outdoor
+        assert result == [10.0, 5.0, 5.0]
 
     def test_none_forecast_same_as_empty(self):
         """None forecast treated like empty list."""
@@ -152,10 +155,23 @@ class TestBuildForecastOutdoorSeries:
         assert result == [8.0] * 4
 
     def test_empty_forecast_single_block(self):
-        """Padding with empty forecast still works for 1 block."""
+        """With single forecast entry and n_blocks=1, block 0 = current_outdoor."""
         forecast = [{"temperature": 3.0}]
         result = build_forecast_outdoor_series(forecast, 10.0, 1)
-        assert result == [3.0]
+        assert result == [10.0]
+
+    def test_block_zero_is_current_outdoor(self):
+        """Block 0 always uses current_outdoor (sensor), not forecast[0]."""
+        forecast = [{"temperature": 15.6}, {"temperature": 14.0}]
+        result = build_forecast_outdoor_series(forecast, 20.67, 6)
+        assert result == [20.67, 15.6, 15.6, 15.6, 15.6, 15.6]
+
+    def test_hourly_expansion_to_blocks(self):
+        """Each hourly forecast entry covers 60 // PLAN_DT_MINUTES blocks."""
+        forecast = [{"temperature": 5.0}, {"temperature": 6.0}]
+        result = build_forecast_outdoor_series(forecast, 10.0, 24)
+        # First hour: sensor + 11 of forecast[0]; second hour: 12 of forecast[1]
+        assert result == [10.0] + [5.0] * 11 + [6.0] * 12
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +206,24 @@ class TestBuildForecastSolarSeries:
         result = build_forecast_solar_series(48.0, 11.0, [], 24)
         assert result is not None
         assert all(v >= 0.0 for v in result)
+
+    def test_hourly_clouds_expanded_per_block(self):
+        """Hourly cloud_coverage is expanded to one value per 5-min block.
+
+        Without expansion, only one block per forecast entry would carry the
+        cloud value (the rest defaulting to clear-sky). With expansion, the
+        first hour stays clear and the second hour stays fully cloudy.
+        """
+        forecast = [{"cloud_coverage": 0}, {"cloud_coverage": 100}]
+        result = build_forecast_solar_series(48.0, 11.0, forecast, 24)
+        assert result is not None
+        assert len(result) == 24
+        # Hour 1 clear, hour 2 fully cloudy: hour 1 mean must dominate
+        # (guarded against nighttime where both are 0).
+        hour1_mean = sum(result[:12]) / 12
+        hour2_mean = sum(result[12:]) / 12
+        if hour1_mean > 0 or hour2_mean > 0:
+            assert hour1_mean >= hour2_mean
 
 
 # ---------------------------------------------------------------------------

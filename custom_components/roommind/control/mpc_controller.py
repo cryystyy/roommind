@@ -1104,16 +1104,34 @@ class MPCController:
         return int(MIN_HORIZON_HOURS * 60 / PLAN_DT_MINUTES)  # default 24 blocks = 2h
 
     def _build_outdoor_series(self, n_blocks: int) -> list[float]:
-        """Build outdoor temperature series from forecast or current value."""
-        if self.outdoor_forecast:
-            series = [
-                f.get("temperature", self.outdoor_temp or DEFAULT_OUTDOOR_TEMP_FALLBACK) for f in self.outdoor_forecast
-            ]
-            while len(series) < n_blocks:
-                series.append(series[-1] if series else (self.outdoor_temp or DEFAULT_OUTDOOR_TEMP_FALLBACK))
-            return series[:n_blocks]
-        T = self.outdoor_temp if self.outdoor_temp is not None else DEFAULT_OUTDOOR_TEMP_FALLBACK
-        return [T] * n_blocks
+        """Build outdoor temperature series for the MPC horizon.
+
+        Block 0 uses the real-time outdoor sensor reading (most accurate for
+        "now"). Subsequent blocks expand each hourly forecast entry to
+        ``60 // PLAN_DT_MINUTES`` blocks. The series is padded with the last
+        forecast value when the horizon exceeds the available forecast length.
+        """
+        if not self.outdoor_forecast:
+            T = self.outdoor_temp if self.outdoor_temp is not None else DEFAULT_OUTDOOR_TEMP_FALLBACK
+            return [T] * n_blocks
+
+        blocks_per_hour = 60 // PLAN_DT_MINUTES
+        fallback = self.outdoor_temp if self.outdoor_temp is not None else DEFAULT_OUTDOOR_TEMP_FALLBACK
+
+        series: list[float] = []
+        for f in self.outdoor_forecast:
+            temp = f.get("temperature", fallback)
+            series.extend([temp] * blocks_per_hour)
+            if len(series) >= n_blocks:
+                break
+
+        if self.outdoor_temp is not None:
+            series[0] = self.outdoor_temp
+
+        while len(series) < n_blocks:
+            series.append(series[-1])
+
+        return series[:n_blocks]
 
     def _build_solar_series(self, n_blocks: int) -> list[float]:
         """Build solar irradiance series for MPC horizon from forecast cloud data."""
