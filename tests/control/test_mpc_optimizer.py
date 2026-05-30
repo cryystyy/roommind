@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import math
+
+import pytest
+
+from custom_components.roommind.const import MIN_POWER_FRACTION, MODE_COOLING, MODE_HEATING
 from custom_components.roommind.control.mpc_optimizer import MPCOptimizer, MPCPlan
 from custom_components.roommind.control.thermal_model import RCModel
 
@@ -732,3 +737,58 @@ def test_hybrid_ufh_ac_cooling_balance_preserved():
     assert plan_hybrid.actions == plan_baseline.actions
     assert plan_hybrid.temperatures == plan_baseline.temperatures
     assert plan_hybrid.power_fractions == plan_baseline.power_fractions
+
+
+# ---------------------------------------------------------------------------
+# approach_rate tests
+# ---------------------------------------------------------------------------
+
+
+def test_approach_rate_one_matches_legacy_deadbeat_formula():
+    """approach_rate=1.0 must reproduce the original one-block formula exactly."""
+    model = RCModel(C=1.0, U=0.3, Q_heat=4.0, Q_cool=6.0)
+    opt = MPCOptimizer(model=model, approach_rate=1.0)
+    T_room, T_out, target, dt = 19.0, 5.0, 21.0, 5.0
+    pf, mode = opt.compute_optimal_power(T_room, T_out, target, dt)
+
+    dt_h = dt / 60.0
+    alpha = model.U
+    beta = 1.0 - math.exp(-alpha * dt_h)
+    T_drift = T_room + beta * (T_out - T_room)
+    energy_bias = (opt.w_energy / max(opt.w_comfort, 0.01)) * alpha / beta * 0.1
+    q_req = max(0.0, (target - T_drift) * alpha / beta - energy_bias)
+    expected = max(min(q_req / max(model.Q_heat, 0.01), 1.0), MIN_POWER_FRACTION)
+
+    assert mode == MODE_HEATING
+    assert pf == pytest.approx(expected)
+
+
+def test_approach_rate_below_one_widens_heating_band():
+    """Gentler approach_rate lowers pf for the same gap (less saturation)."""
+    model = RCModel(C=1.0, U=0.3, Q_heat=20.0, Q_cool=6.0)
+    args = (19.0, 5.0, 21.0, 5.0)
+    pf_full, _ = MPCOptimizer(model=model, approach_rate=1.0).compute_optimal_power(*args)
+    pf_gentle, _ = MPCOptimizer(model=model, approach_rate=0.3).compute_optimal_power(*args)
+    assert pf_full == 1.0
+    assert pf_gentle < pf_full
+    assert pf_gentle >= MIN_POWER_FRACTION
+
+
+def test_holding_power_independent_of_approach_rate():
+    """At target, only holding power is needed; approach_rate must not change it."""
+    model = RCModel(C=1.0, U=0.3, Q_heat=20.0, Q_cool=6.0)
+    args = (21.0, 5.0, 21.0, 5.0)
+    pf_full, _ = MPCOptimizer(model=model, approach_rate=1.0).compute_optimal_power(*args)
+    pf_gentle, _ = MPCOptimizer(model=model, approach_rate=0.2).compute_optimal_power(*args)
+    assert pf_full == pytest.approx(pf_gentle)
+
+
+def test_approach_rate_widens_cooling_band_symmetrically():
+    """Cooling path is gentled the same way as heating."""
+    model = RCModel(C=1.0, U=0.3, Q_heat=4.0, Q_cool=20.0)
+    args = (26.0, 30.0, 23.0, 5.0)
+    pf_full, m1 = MPCOptimizer(model=model, approach_rate=1.0).compute_optimal_power(*args)
+    pf_gentle, m2 = MPCOptimizer(model=model, approach_rate=0.3).compute_optimal_power(*args)
+    assert m1 == MODE_COOLING and m2 == MODE_COOLING
+    assert pf_gentle < pf_full
+    assert pf_gentle >= MIN_POWER_FRACTION

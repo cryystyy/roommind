@@ -63,6 +63,7 @@ class MPCOptimizer:
     temp_max: float = 30.0  # overheat protection
     override_active: bool = False
     heating_system_type: str = ""  # key into HEATING_SYSTEM_PROFILES; "" = unknown
+    approach_rate: float = 1.0  # fraction of remaining gap closed per block; 1.0 = legacy deadbeat
 
     def __post_init__(self) -> None:
         # Set before optimize() runs so callers / patched optimize() still expose
@@ -380,7 +381,13 @@ class MPCOptimizer:
             else:
                 T_drift += self.model.Q_occupancy * q_occupancy * dt_h
 
-        Q_required = (target - T_drift) * alpha / beta
+        # Reference sub-target: close `approach_rate` of the remaining gap this block
+        # instead of the whole gap (deadbeat). approach_rate=1.0 => T_ref == target =>
+        # identical to the legacy formula. Smaller values widen the proportional band.
+        # Holding power is preserved: at steady state (T_room == target) T_ref == target
+        # for any approach_rate, so Q_required reduces to the holding power.
+        T_ref = T_room + self.approach_rate * (target - T_room)
+        Q_required = (T_ref - T_drift) * alpha / beta
 
         # Energy penalty: bias toward less power based on comfort/energy weights
         energy_bias = (self.w_energy / max(self.w_comfort, 0.01)) * alpha / beta * 0.1
