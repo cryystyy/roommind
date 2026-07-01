@@ -466,7 +466,7 @@ async def test_diagnostics_compressor_groups(hass, mock_config_entry):
     store.get_settings.return_value = {}
     store.get_rooms.return_value = {}
 
-    now = time.time()
+    now = time.monotonic()
     group_cfg = MagicMock()
     group_cfg.min_run_seconds = 180
     group_cfg.min_off_seconds = 300
@@ -499,7 +499,7 @@ async def test_diagnostics_compressor_master_device(hass, mock_config_entry):
     store.get_settings.return_value = {}
     store.get_rooms.return_value = {}
 
-    now = time.time()
+    now = time.monotonic()
     group_cfg = MagicMock()
     group_cfg.min_run_seconds = 180
     group_cfg.min_off_seconds = 300
@@ -575,7 +575,7 @@ async def test_diagnostics_compressor_off_since(hass, mock_config_entry):
     store.get_settings.return_value = {}
     store.get_rooms.return_value = {}
 
-    now = time.time()
+    now = time.monotonic()
     group_cfg = MagicMock()
     group_cfg.min_run_seconds = 180
     group_cfg.min_off_seconds = 300
