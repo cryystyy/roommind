@@ -214,6 +214,7 @@ export class RsCoverSection extends LitElement {
       .status-hint {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 6px;
         color: var(--secondary-text-color);
         font-size: 0.85em;

@@ -1549,6 +1549,39 @@ def test_baseline_restore_full_episode(mock_t):
 
 
 @patch("custom_components.roommind.managers.cover_manager.time")
+def test_retract_relinquishes_ownership_after_baseline_restore(mock_t):
+    """#325: restoring a real user baseline must relinquish ownership.
+
+    Full episode: user at 50 -> deploy (owned, baseline=50) -> retract1 restores
+    to 50 and must relinquish ownership -> retract2 (15+ min later) must HOLD at
+    50, not auto-open to 100.
+    """
+    mgr = CoverManager()
+    mock_t.time.return_value = 1000.0
+    mgr.update_position("lr", 50)
+    d = mgr.evaluate("lr", predicted_peak_temp=25.0, target_temp=21.0, **_BASE_KWARGS)
+    assert d.changed is True
+    state = mgr._get_state("lr")
+    assert state.owned is True
+    assert state.baseline_position == 50
+
+    # retract1: deadband trigger (excess below retract_threshold) restores baseline
+    mock_t.time.return_value = 2000.0
+    d = mgr.evaluate("lr", predicted_peak_temp=20.0, target_temp=21.0, **_BASE_KWARGS)
+    assert d.changed is True
+    assert d.target_position == 50
+    assert state.owned is False
+    assert state.baseline_position is None
+
+    # retract2: well past min-hold time, must HOLD at the restored user position
+    mock_t.time.return_value = 2000.0 + COVER_MIN_HOLD_SECONDS + 1
+    d = mgr.evaluate("lr", predicted_peak_temp=20.0, target_temp=21.0, **_BASE_KWARGS)
+    assert d.changed is False
+    assert d.reason == "user_position_hold"
+    assert d.target_position == 50
+
+
+@patch("custom_components.roommind.managers.cover_manager.time")
 def test_baseline_is_openness_ceiling_during_episode(mock_t):
     """Modulation within an episode never opens beyond the baseline."""
     mgr = CoverManager()

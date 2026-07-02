@@ -380,5 +380,11 @@ class CoverManager:
             return CoverDecision(target_position=current, changed=False, reason="user_position_hold")
         if not hold_time_ok:
             return CoverDecision(target_position=current, changed=False, reason=rate_limited_reason)
+        had_baseline = state.baseline_position is not None
         state.baseline_position = None
-        return self._apply_change(state, target, apply_reason)
+        decision = self._apply_change(state, target, apply_reason)
+        if had_baseline:
+            # Restoring a real user baseline hands the position back to the user —
+            # relinquish ownership so the next retract doesn't auto-open it to 100.
+            state.owned = False
+        return decision
