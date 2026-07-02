@@ -89,6 +89,7 @@ export class RsRoomDetail extends LitElement {
   @state() private _heatSourcePrimaryDelta = 1.5;
   @state() private _heatSourceOutdoorThreshold = 5.0;
   @state() private _heatSourceAcMinOutdoor = -15.0;
+  @state() private _optimisticCoverResume = false;
 
   private _prevAreaId: string | null = null;
   private _saveDebounce?: ReturnType<typeof setTimeout>;
@@ -223,6 +224,14 @@ export class RsRoomDetail extends LitElement {
       if (prevConfig === null || prevConfig === undefined) {
         this._initFromConfig();
       }
+    }
+
+    if (
+      changedProps.has("config") &&
+      this._optimisticCoverResume &&
+      !this.config?.live?.cover_auto_paused
+    ) {
+      this._optimisticCoverResume = false;
     }
   }
 
@@ -548,7 +557,10 @@ export class RsRoomDetail extends LitElement {
                   .nightPosition=${this._coversNightPosition}
                   .snapDeploy=${this._coversSnapDeploy}
                   .forcedReason=${this.config?.live?.cover_forced_reason ?? ""}
-                  .autoPaused=${this.config?.live?.cover_auto_paused ?? false}
+                  .autoPaused=${this._optimisticCoverResume
+                    ? false
+                    : (this.config?.live?.cover_auto_paused ?? false)}
+                  .overrideUntil=${this.config?.live?.cover_override_until ?? null}
                   .coverOrientations=${this._coverOrientations}
                   .nightCloseElevation=${this._coversNightCloseElevation}
                   .nightCloseOffsetMinutes=${this._coversNightCloseOffsetMinutes}
@@ -556,6 +568,7 @@ export class RsRoomDetail extends LitElement {
                   .coverMinPositions=${this._coverMinPositions}
                   @covers-toggle=${this._onCoversToggle}
                   @setting-changed=${this._onCoverSettingChanged}
+                  @cover-resume-auto=${this._onCoverResumeAuto}
                 ></rs-covers-section>
               </rs-section-card>`
             : nothing}
@@ -819,7 +832,10 @@ export class RsRoomDetail extends LitElement {
             .nightPosition=${this._coversNightPosition}
             .snapDeploy=${this._coversSnapDeploy}
             .forcedReason=${this.config?.live?.cover_forced_reason ?? ""}
-            .autoPaused=${this.config?.live?.cover_auto_paused ?? false}
+            .autoPaused=${this._optimisticCoverResume
+              ? false
+              : (this.config?.live?.cover_auto_paused ?? false)}
+            .overrideUntil=${this.config?.live?.cover_override_until ?? null}
             .coverOrientations=${this._coverOrientations}
             .nightCloseElevation=${this._coversNightCloseElevation}
             .nightCloseOffsetMinutes=${this._coversNightCloseOffsetMinutes}
@@ -827,6 +843,7 @@ export class RsRoomDetail extends LitElement {
             .coverMinPositions=${this._coverMinPositions}
             @covers-toggle=${this._onCoversToggle}
             @setting-changed=${this._onCoverSettingChanged}
+            @cover-resume-auto=${this._onCoverResumeAuto}
           ></rs-covers-section>
         </rs-edit-dialog>`;
       case "heatSource":
@@ -1003,6 +1020,18 @@ export class RsRoomDetail extends LitElement {
     else if (key === "cover_min_positions")
       this._coverMinPositions = value as Record<string, number>;
     this._autoSave();
+  }
+
+  private async _onCoverResumeAuto() {
+    this._optimisticCoverResume = true;
+    try {
+      await this.hass.callWS({
+        type: "roommind/covers/clear_override",
+        area_id: this.area.area_id,
+      });
+    } catch {
+      this._optimisticCoverResume = false;
+    }
   }
 
   // ---- Heat source orchestration ----

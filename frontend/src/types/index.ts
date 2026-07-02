@@ -49,6 +49,7 @@ export interface RoomLiveData {
   mold_prevention_delta: number;
   blind_position: number | null;
   cover_auto_paused: boolean;
+  cover_override_until?: number | null;
   cover_forced_reason: string;
   active_cover_schedule_index: number;
   active_heat_sources: string | null;

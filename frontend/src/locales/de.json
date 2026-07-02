@@ -217,6 +217,8 @@
   "covers.add_cover": "Rollo-Entität hinzufügen...",
   "covers.shading_active": "Beschattung aktiv",
   "covers.auto_paused": "Automatik pausiert (manuell übersteuert)",
+  "covers.auto_paused_until": "Automatik pausiert bis",
+  "covers.resume_auto": "Automatik jetzt fortsetzen",
   "covers.done": "Fertig",
   "covers.night_close": "Nachts automatisch schließen",
   "covers.night_close_hint": "Rolläden bei Sonnenuntergang schließen und bei Sonnenaufgang öffnen.",

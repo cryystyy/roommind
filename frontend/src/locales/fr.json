@@ -217,6 +217,8 @@
   "covers.add_cover": "Ajouter une entité de store...",
   "covers.shading_active": "Ombrage activé",
   "covers.auto_paused": "Pause auto (dérogation manuelle)",
+  "covers.auto_paused_until": "Contrôle automatique en pause jusqu'à",
+  "covers.resume_auto": "Reprendre le contrôle automatique",
   "covers.done": "Terminé",
   "covers.night_close": "Fermer la nuit",
   "covers.night_close_hint": "Ferme automatiquement les stores au coucher du soleil et les ouvre au lever du soleil.",

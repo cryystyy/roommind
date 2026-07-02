@@ -217,6 +217,8 @@
   "covers.add_cover": "Add cover entity...",
   "covers.shading_active": "Shading active",
   "covers.auto_paused": "Auto paused (manual override)",
+  "covers.auto_paused_until": "Auto control paused until",
+  "covers.resume_auto": "Resume automatic control",
   "covers.done": "Done",
   "covers.night_close": "Close at night",
   "covers.night_close_hint": "Automatically close covers at sunset and open at sunrise.",
