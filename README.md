@@ -16,7 +16,7 @@
 | custom\_components/roommind/control/residual\_heat.py              |       24 |        0 |    100% |           |
 | custom\_components/roommind/control/solar.py                       |       81 |        1 |     99% |        72 |
 | custom\_components/roommind/control/thermal\_model.py              |      442 |       17 |     96% |394, 863-878, 989, 1112, 1119-1123 |
-| custom\_components/roommind/coordinator.py                         |      888 |       54 |     94% |333-334, 614-617, 653, 818-819, 829, 831, 1225, 1266, 1324, 1562-1565, 1700-1702, 1706-1712, 1716, 1725, 1746, 1751, 1753, 1756, 1759, 1795, 1800-1805, 1809, 1842, 1844, 1847, 1850, 1866-1867, 1983, 2003-2011, 2029-2030, 2045-2050, 2067-2068 |
+| custom\_components/roommind/coordinator.py                         |      896 |       54 |     94% |337-338, 618-621, 657, 836-837, 847, 849, 1243, 1284, 1342, 1580-1583, 1719-1721, 1725-1731, 1735, 1744, 1765, 1770, 1772, 1775, 1778, 1818, 1823-1828, 1832, 1865, 1867, 1870, 1873, 1889-1890, 2006, 2026-2034, 2052-2053, 2068-2073, 2090-2091 |
 | custom\_components/roommind/diagnostics.py                         |      166 |        0 |    100% |           |
 | custom\_components/roommind/managers/\_\_init\_\_.py               |        0 |        0 |    100% |           |
 | custom\_components/roommind/managers/compressor\_group\_manager.py |      157 |        2 |     99% |  121, 184 |
@@ -45,7 +45,7 @@
 | custom\_components/roommind/utils/sensor\_utils.py                 |       29 |        1 |     97% |        25 |
 | custom\_components/roommind/utils/temp\_utils.py                   |       26 |        0 |    100% |           |
 | custom\_components/roommind/websocket\_api.py                      |      292 |        2 |     99% |   674-679 |
-| **TOTAL**                                                          | **5655** |  **238** | **96%** |           |
+| **TOTAL**                                                          | **5663** |  **238** | **96%** |           |
 
 
 ## Setup coverage badge
