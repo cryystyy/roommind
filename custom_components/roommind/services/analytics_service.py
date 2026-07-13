@@ -83,6 +83,7 @@ async def _compute_target_forecast(
     hours: float = 3.0,
     interval_minutes: int = 5,
     schedule_blocks_cache: dict[str, dict] | None = None,
+    direction: str = "",
 ) -> list[dict]:
     """Compute target temperature forecast for the next N hours.
 
@@ -154,8 +155,11 @@ async def _compute_target_forecast(
             target = cool_target
         elif climate_mode == CLIMATE_MODE_HEAT_ONLY:
             target = heat_target
+        elif direction == "cooling":
+            # Auto mode, cooling season: chart the cool target (not heat).
+            target = cool_target
         else:
-            # Auto mode: show heat target (primary for chart line)
+            # Auto mode (heating orientation or unknown): heat target.
             target = heat_target
 
         result.append(
@@ -260,9 +264,11 @@ async def build_analytics_data(
     # Build merged forecast: same format as history points, on a shared 5-min grid
     room_config = store.get_room(area_id) or {}
     mold_delta = 0.0
+    live_direction = ""
     if coordinator:
         live = coordinator.rooms.get(area_id, {})
         mold_delta = live.get("mold_prevention_delta", 0.0)
+        live_direction = live.get("direction", "")
     try:
         target_forecast = await _compute_target_forecast(
             hass,
@@ -270,6 +276,7 @@ async def build_analytics_data(
             settings,
             mold_prevention_delta=mold_delta,
             schedule_blocks_cache=getattr(coordinator, "_schedule_blocks_cache", None),
+            direction=live_direction,
         )
     except Exception:  # noqa: BLE001
         _LOGGER.debug("Target forecast computation failed for '%s'", area_id)
