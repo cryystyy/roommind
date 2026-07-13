@@ -523,5 +523,21 @@
   "heat_source.ac_min_outdoor": "Température extérieure min. pour la climatisation",
   "heat_source.ac_min_outdoor_hint": "Désactiver complètement la climatisation en dessous de cette température pour protéger le matériel de la pompe à chaleur.",
   "heat_source.ac_min_outdoor_suffix": "°C",
-  "heat_source.summary_disabled": "La sélection intelligente de la source est désactivée"
+  "heat_source.summary_disabled": "La sélection intelligente de la source est désactivée",
+  "hero.dewpoint_limited": "Refroidissement limité par le point de rosée (protection condensation)",
+  "decision.climate_disabled": "Contrôle climatique désactivé",
+  "decision.waiting_for_data": "En attente des capteurs",
+  "decision.window_open": "Fenêtre ouverte",
+  "decision.force_off": "Éteint",
+  "decision.dew_point_limited": "Limité par le point de rosée",
+  "decision.below_heat_target": "Sous la cible de chauffage",
+  "decision.above_cool_target": "Au-dessus de la cible de refroidissement",
+  "decision.no_capable_device": "Aucun appareil compatible",
+  "decision.mpc_plan_idle": "MPC prévoit l'inactivité",
+  "decision.in_deadband": "Dans la zone de confort",
+  "decision.src_override": "manuel",
+  "decision.src_vacation": "vacances",
+  "decision.src_presence_away": "absent",
+  "decision.src_schedule": "planning",
+  "decision.src_comfort_eco": "confort/éco"
 }

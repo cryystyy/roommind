@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from datetime import timedelta
 from typing import Any
 
@@ -129,6 +130,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         self._history_rotate_count: int = 0
         self._pending_predictions: dict[str, float] = {}
         self._prediction_forecasts: dict[str, list[dict]] = {}
+        # Per-room ring buffer of structured control decisions ("why is this
+        # room heating?") — surfaced via roommind/decisions/get and the panel.
+        self._decision_traces: dict[str, deque[dict]] = {}
         self._weather_manager = WeatherManager(hass)
         self._current_q_solar: float = 0.0
         # Valve protection (anti-seize)
@@ -1055,7 +1059,29 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             climate_active=climate_active,
         )
 
+        # --- Decision trace: structured "why" for this cycle ---
+        decision = self._record_decision(
+            area_id=area_id,
+            room=room,
+            settings=settings,
+            targets=targets,
+            mode=mode,
+            power_fraction=power_fraction,
+            current_temp=current_temp,
+            can_heat=room_can_heat,
+            can_cool=room_can_cool,
+            mpc_active=mpc_active,
+            window_open=window_open,
+            force_off=force_off,
+            presence_away=presence_away,
+            climate_active=climate_active,
+            waiting_for_data=waiting_for_data,
+            cooling_limited=cooling_limited,
+            feels_like_delta=feels_like_delta,
+        )
+
         return self._build_room_state_dict(
+            decision=decision,
             area_id=area_id,
             room=room,
             settings=settings,
@@ -1089,6 +1115,100 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             cooling_limited=cooling_limited,
             feels_like_delta=feels_like_delta,
         )
+
+    def _record_decision(
+        self,
+        *,
+        area_id: str,
+        room: dict,
+        settings: dict,
+        targets: TargetTemps,
+        mode: str,
+        power_fraction: float,
+        current_temp: float | None,
+        can_heat: bool,
+        can_cool: bool,
+        mpc_active: bool,
+        window_open: bool,
+        force_off: bool,
+        presence_away: bool,
+        climate_active: bool,
+        waiting_for_data: bool,
+        cooling_limited: str,
+        feels_like_delta: float,
+    ) -> dict:
+        """Build and store a structured explanation of this cycle's decision.
+
+        The dominant constraint wins the ``reason`` key; the full field set
+        lets the panel (and bug reports) reconstruct the entire chain.
+        """
+        # Which rung of the target priority chain produced the target
+        vacation_until = settings.get("vacation_until")
+        if is_override_active(room) and not is_override_suppressed(room, settings, presence_away):
+            target_source = "override"
+        elif vacation_until and time.time() < vacation_until:
+            target_source = "vacation"
+        elif presence_away:
+            target_source = "presence_away"
+        elif self._get_active_schedule_index(room) >= 0:
+            target_source = "schedule"
+        else:
+            target_source = "comfort_eco"
+
+        # Dominant constraint for the one-line "why"
+        if not climate_active:
+            reason = "climate_disabled"
+        elif waiting_for_data:
+            reason = "waiting_for_data"
+        elif window_open:
+            reason = "window_open"
+        elif force_off:
+            reason = "force_off"
+        elif cooling_limited:
+            reason = "dew_point_limited"
+        elif mode == MODE_HEATING:
+            reason = "below_heat_target"
+        elif mode == MODE_COOLING:
+            reason = "above_cool_target"
+        elif not can_heat and not can_cool:
+            reason = "no_capable_device"
+        elif mpc_active:
+            reason = "mpc_plan_idle"
+        else:
+            reason = "in_deadband"
+
+        decision = {
+            "ts": round(time.time(), 1),
+            "reason": reason,
+            "target_source": target_source,
+            "mode": mode,
+            "power_fraction": round(power_fraction, 2),
+            "current_temp": current_temp,
+            "heat_target": targets.heat,
+            "cool_target": targets.cool,
+            "can_heat": can_heat,
+            "can_cool": can_cool,
+            "mpc_active": mpc_active,
+            "outdoor_temp": self.outdoor_temp_effective,
+            "window_open": window_open,
+            "force_off": force_off,
+            "presence_away": presence_away,
+            "cooling_limited": cooling_limited,
+            "feels_like_delta": feels_like_delta,
+        }
+        buf = self._decision_traces.setdefault(area_id, deque(maxlen=50))
+        # Only append when something meaningful changed (or every ~5 min) so
+        # the buffer spans hours of history instead of 25 min of duplicates.
+        prev = buf[-1] if buf else None
+        _volatile = ("ts", "current_temp", "outdoor_temp", "power_fraction")
+        if (
+            prev is None
+            or {k: v for k, v in prev.items() if k not in _volatile}
+            != {k: v for k, v in decision.items() if k not in _volatile}
+            or decision["ts"] - prev["ts"] >= 300
+        ):
+            buf.append(decision)
+        return decision
 
     async def _observe_and_train(
         self,
@@ -1362,6 +1482,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         room_dew_point: float | None = None,
         cooling_limited: str = "",
         feels_like_delta: float = 0.0,
+        decision: dict | None = None,
     ) -> dict:
         """Build the final room state dictionary."""
         _room_devices = room.get("devices", [])
@@ -1382,6 +1503,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "dew_point": (round(room_dew_point, 1) if room_dew_point is not None else None),
             "cooling_limited": cooling_limited,
             "feels_like_delta": feels_like_delta,
+            "decision_reason": (decision or {}).get("reason", ""),
+            "decision_target_source": (decision or {}).get("target_source", ""),
             "mode": display_mode,
             "direction": _direction,
             "commanded_mode": mode,

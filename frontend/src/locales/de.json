@@ -523,5 +523,21 @@
   "heat_source.ac_min_outdoor": "Min. Außentemp. für AC-Heizen",
   "heat_source.ac_min_outdoor_hint": "AC-Heizen unter dieser Temperatur komplett deaktivieren, um die Wärmepumpen-Hardware zu schützen.",
   "heat_source.ac_min_outdoor_suffix": "°C",
-  "heat_source.summary_disabled": "Intelligente Quellenwahl ist aus"
+  "heat_source.summary_disabled": "Intelligente Quellenwahl ist aus",
+  "hero.dewpoint_limited": "Kühlung durch Taupunkt begrenzt (Kondensationsschutz)",
+  "decision.climate_disabled": "Klimasteuerung deaktiviert",
+  "decision.waiting_for_data": "Warte auf Sensordaten",
+  "decision.window_open": "Fenster offen",
+  "decision.force_off": "Ausgeschaltet",
+  "decision.dew_point_limited": "Durch Taupunkt begrenzt",
+  "decision.below_heat_target": "Unter Heizziel",
+  "decision.above_cool_target": "Über Kühlziel",
+  "decision.no_capable_device": "Kein geeignetes Gerät",
+  "decision.mpc_plan_idle": "MPC plant Leerlauf",
+  "decision.in_deadband": "Im Komfortband",
+  "decision.src_override": "Manuell",
+  "decision.src_vacation": "Urlaub",
+  "decision.src_presence_away": "Abwesend",
+  "decision.src_schedule": "Zeitplan",
+  "decision.src_comfort_eco": "Komfort/Eco"
 }

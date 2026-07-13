@@ -264,6 +264,11 @@ async def websocket_list_rooms(
             "active_cover_schedule_index": live.get("active_cover_schedule_index", -1),
             "active_heat_sources": live.get("active_heat_sources"),
             "learning_paused_reason": learning_paused_reason,
+            "dew_point": live.get("dew_point"),
+            "cooling_limited": live.get("cooling_limited", ""),
+            "feels_like_delta": live.get("feels_like_delta", 0),
+            "decision_reason": live.get("decision_reason", ""),
+            "decision_target_source": live.get("decision_target_source", ""),
         }
         result[area_id] = room_data
 
@@ -957,6 +962,28 @@ async def websocket_covers_clear_override(
 
 
 @callback
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "roommind/decisions/get",
+        vol.Required("area_id"): str,
+        vol.Optional("limit"): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
+    }
+)
+@websocket_api.async_response
+async def websocket_get_decisions(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return the recent decision trace for a room (newest last)."""
+    coordinator = _get_coordinator(hass)
+    traces: list[dict] = []
+    if coordinator:
+        traces = list(coordinator._decision_traces.get(msg["area_id"], []))
+    limit = msg.get("limit", 50)
+    connection.send_result(msg["id"], {"decisions": traces[-limit:]})
+
+
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register all RoomMind WebSocket commands."""
     websocket_api.async_register_command(hass, websocket_list_rooms)
@@ -972,3 +999,4 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_boost_learning)
     websocket_api.async_register_command(hass, websocket_get_diagnostics)
     websocket_api.async_register_command(hass, websocket_covers_clear_override)
+    websocket_api.async_register_command(hass, websocket_get_decisions)

@@ -55,6 +55,11 @@ export interface RoomLiveData {
   active_cover_schedule_index: number;
   active_heat_sources: string | null;
   learning_paused_reason: "outdoor_unavailable" | null;
+  dew_point?: number | null;
+  cooling_limited?: string; // "" | "dew_point" | "dew_point_floor"
+  feels_like_delta?: number;
+  decision_reason?: string; // dominant constraint key for "why is it doing X"
+  decision_target_source?: string; // override|vacation|presence_away|schedule|comfort_eco
 }
 
 export type DeviceType = "trv" | "ac";

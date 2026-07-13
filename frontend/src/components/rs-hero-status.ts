@@ -3,7 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import type { HomeAssistant, HassArea, RoomConfig, OverrideType } from "../types";
 import { getModeClass, formatMode } from "../utils/room-state";
 import { modeStyles } from "../styles/shared-mode-styles";
-import { localize } from "../utils/localize";
+import { localize, type TranslationKey } from "../utils/localize";
 import { formatTemp, tempUnit, toDisplayDelta } from "../utils/temperature";
 import "./shared/rs-info-icon";
 
@@ -267,6 +267,18 @@ export class RsHeroStatus extends LitElement {
         font-size: 11px;
         color: var(--secondary-text-color);
         cursor: pointer;
+      }
+      .why-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        opacity: 0.85;
+      }
+      .why-pill ha-icon {
+        --mdc-icon-size: 13px;
+        opacity: 0.5;
       }
       .control-mode-info-icon {
         --mdc-icon-size: 14px;
@@ -572,6 +584,23 @@ export class RsHeroStatus extends LitElement {
                         </span>
                       `
                     : nothing}
+                  ${live?.decision_reason
+                    ? html`
+                        <span class="why-pill">
+                          <ha-icon icon="mdi:help-circle-outline"></ha-icon>
+                          ${localize(
+                            `decision.${live.decision_reason}` as TranslationKey,
+                            this.hass?.language ?? "en",
+                          )}${live.decision_target_source
+                            ? html` ·
+                              ${localize(
+                                `decision.src_${live.decision_target_source}` as TranslationKey,
+                                this.hass?.language ?? "en",
+                              )}`
+                            : nothing}
+                        </span>
+                      `
+                    : nothing}
                 </div>
               `
             : nothing}
@@ -591,6 +620,12 @@ export class RsHeroStatus extends LitElement {
                 ? html`<div class="hero-window-open">
                     <ha-icon icon="mdi:window-open-variant"></ha-icon>
                     ${localize("hero.window_open", this.hass?.language ?? "en")}
+                  </div>`
+                : nothing}
+              ${live.cooling_limited && !this.isOutdoor
+                ? html`<div class="hero-window-open">
+                    <ha-icon icon="mdi:water-alert"></ha-icon>
+                    ${localize("hero.dewpoint_limited", this.hass?.language ?? "en")}
                   </div>`
                 : nothing}
               <div class="hero-temps">

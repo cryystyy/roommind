@@ -42,6 +42,8 @@ NORMAL_ROOM_KEYS = {
     "dew_point",
     "cooling_limited",
     "feels_like_delta",
+    "decision_reason",
+    "decision_target_source",
     "mode",
     "direction",
     "commanded_mode",
