@@ -48,6 +48,36 @@ def has_reliable_hvac_modes(state: Any) -> bool:
     return bool(modes & _ACTIVE_HVAC_MODES)
 
 
+def state_is_cool_only(state: Any) -> bool:
+    """True when a device reliably reports cooling but NO heating capability.
+
+    Matches reversible-system zones (e.g. Rehau TABS) that expose
+    ["off", "cool"] in cooling season.  Devices that also expose heating
+    (heat/heat_cool/auto) keep their legacy thermostat semantics, and
+    unreliable mode lists (see has_reliable_hvac_modes) never qualify:
+    a heat-only TRV with misreported modes must not receive cool commands.
+    """
+    if not has_reliable_hvac_modes(state):
+        return False
+    modes = set(state.attributes.get("hvac_modes") or [])
+    return "cool" in modes and not (modes & {"heat", "heat_cool", "auto"})
+
+
+def state_supports_heating(state: Any) -> bool:
+    """True when a device state may support heating.
+
+    Unreliable or missing modes assume heating (legacy behavior: TRVs are
+    heaters, and permanently-off devices like Wavin Sentio heat via setpoint
+    only).  Only a reliably reported mode list without any heat-capable mode
+    (e.g. a reversible TABS zone reporting ["off", "cool"] in summer)
+    denies heating.
+    """
+    if not has_reliable_hvac_modes(state):
+        return True
+    modes = set(state.attributes.get("hvac_modes") or [])
+    return bool(modes & {"heat", "heat_cool", "auto"})
+
+
 def legacy_to_devices(
     thermostats: list[str],
     acs: list[str],

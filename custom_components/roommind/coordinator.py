@@ -48,6 +48,8 @@ from .control.mpc_controller import (
     DEFAULT_OUTDOOR_TEMP_FALLBACK,
     MPCController,
     check_acs_can_heat,
+    check_trvs_can_cool,
+    check_trvs_can_heat,
     get_can_heat_cool,
     is_mpc_active,
 )
@@ -74,6 +76,7 @@ from .utils.device_utils import (
     get_direct_setpoint_eids,
     get_trv_eids,
     room_contributes_to_group,
+    state_is_cool_only,
 )
 from .utils.history_store import HistoryStore
 from .utils.schedule_utils import resolve_schedule_index
@@ -644,6 +647,16 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         )
         mode, power_fraction = await controller.async_evaluate(current_temp, targets)
 
+        # Room capabilities (state-aware): reused for target display and mpc_active
+        room_can_heat, room_can_cool = get_can_heat_cool(
+            room,
+            self.outdoor_temp_effective,
+            acs_can_heat=check_acs_can_heat(self.hass, room),
+            override_active=is_override_active(room),
+            trvs_can_cool=check_trvs_can_cool(self.hass, room),
+            trvs_can_heat=check_trvs_can_heat(self.hass, room),
+        )
+
         # Compute effective single target_temp for display/history (mode + climate_mode aware)
         climate_mode = room.get("climate_mode", "auto")
         if climate_mode == CLIMATE_MODE_COOL_ONLY:
@@ -654,6 +667,10 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             if mode == MODE_HEATING and targets.heat is not None:
                 target_temp = targets.heat
             elif mode == MODE_COOLING and targets.cool is not None:
+                target_temp = targets.cool
+            elif room_can_cool and not room_can_heat and targets.cool is not None:
+                # Idle on a cool-only capable room (e.g. TABS in summer):
+                # show the cooling target, not the heating one
                 target_temp = targets.cool
             else:
                 target_temp = targets.heat if targets.heat is not None else targets.cool
@@ -722,6 +739,13 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     ac_min_temps.append(ha_temp_to_celsius(self.hass, st.attributes["min_temp"]))
                 if st.attributes.get("max_temp") is not None:
                     ac_max_temps.append(ha_temp_to_celsius(self.hass, st.attributes["max_temp"]))
+        # Thermostat-typed devices that currently support cooling (reversible
+        # systems, e.g. TABS zones) are driven like ACs in cooling mode —
+        # include their floor in the cooling boost limit.
+        for eid in get_trv_eids(room.get("devices", [])):
+            st = self.hass.states.get(eid)
+            if st and state_is_cool_only(st) and st.attributes.get("min_temp") is not None:
+                ac_min_temps.append(ha_temp_to_celsius(self.hass, st.attributes["min_temp"]))
         device_min_temp = max(ac_min_temps) if ac_min_temps else None
         ac_device_max_temp = min(ac_max_temps) if ac_max_temps else None
 
@@ -785,12 +809,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     if self._compressor_manager.check_must_stay_active(eid):
                         compressor_forced_on.add(eid)
 
-            # In cooling mode only ACs can cool, so TRVs must not prevent the IDLE
-            # transition when all cooling-capable devices are blocked.  In heating
-            # mode both TRVs and ACs can contribute, so the full device set applies.
-            _mode_relevant_eids = (
-                set(get_ac_eids(room.get("devices", []))) if mode == MODE_COOLING else set(all_device_eids)
-            )
+            # In cooling mode only cooling-capable devices matter, so heat-only
+            # TRVs must not prevent the IDLE transition when all cooling-capable
+            # devices are blocked.  In heating mode both TRVs and ACs can
+            # contribute, so the full device set applies.
+            if mode == MODE_COOLING:
+                _mode_relevant_eids = set(get_ac_eids(room.get("devices", []))) | {
+                    eid
+                    for eid in get_trv_eids(room.get("devices", []))
+                    if state_is_cool_only(self.hass.states.get(eid))
+                }
+            else:
+                _mode_relevant_eids = set(all_device_eids)
             if compressor_forced_off and _mode_relevant_eids and compressor_forced_off >= _mode_relevant_eids:
                 mode = MODE_IDLE
                 power_fraction = 0.0
@@ -885,12 +915,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         mpc_active = False
         if has_external_sensor:
             try:
-                _ch, _cc = get_can_heat_cool(
-                    room,
-                    self.outdoor_temp_effective,
-                    acs_can_heat=check_acs_can_heat(self.hass, room),
-                    override_active=is_override_active(room),
-                )
+                _ch, _cc = room_can_heat, room_can_cool
                 _T_out = (
                     self.outdoor_temp_effective
                     if self.outdoor_temp_effective is not None
@@ -1079,7 +1104,12 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         learning_disabled = settings.get("learning_disabled_rooms", [])
         learning_active = area_id not in learning_disabled
         if learning_active and current_temp_raw is not None and self.outdoor_temp_effective is not None:
-            can_heat, can_cool = get_can_heat_cool(room, acs_can_heat=check_acs_can_heat(self.hass, room))
+            can_heat, can_cool = get_can_heat_cool(
+                room,
+                acs_can_heat=check_acs_can_heat(self.hass, room),
+                trvs_can_cool=check_trvs_can_cool(self.hass, room),
+                trvs_can_heat=check_trvs_can_heat(self.hass, room),
+            )
             self._ekf_training.process(
                 area_id=area_id,
                 current_temp=current_temp_raw,
@@ -1112,9 +1142,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # (residual heat, valve actuation, _previous_modes).  See #36, #69.
         if climate_active:
             if has_external_sensor:
-                # Full Control: controller's mode is authoritative
+                # Full Control: controller's mode is authoritative...
                 display_mode = mode
                 display_pf = power_fraction
+                # ...except when RoomMind commands idle while the devices are
+                # observably still heating/cooling (e.g. high-latency slab
+                # systems).  Show physical reality; internal tracking
+                # (_previous_modes, residual heat) stays on the commanded mode.
+                if mode == MODE_IDLE:
+                    obs_mode, obs_pf = self._observe_device_action(room)
+                    if obs_mode in (MODE_HEATING, MODE_COOLING):
+                        display_mode = obs_mode
+                        display_pf = obs_pf
             else:
                 # Managed Mode: show observed/inferred device state (#69)
                 display_mode = managed_display_mode if managed_display_mode is not None else mode

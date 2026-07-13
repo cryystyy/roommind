@@ -733,6 +733,7 @@ export class RsDeviceSection extends LitElement {
                 .options=${[
                   { value: "off", label: localize("devices.idle_action_off", lang) },
                   { value: "low", label: localize("devices.idle_action_low", lang) },
+                  { value: "setback", label: localize("devices.idle_action_setback", lang) },
                 ]}
                 @selected=${(e: Event) => this._onIdleActionChange(entityId, getSelectValue(e)!)}
                 @closed=${(e: Event) => e.stopPropagation()}
@@ -743,6 +744,9 @@ export class RsDeviceSection extends LitElement {
                 >
                 <ha-list-item value="low"
                   >${localize("devices.idle_action_low", lang)}</ha-list-item
+                >
+                <ha-list-item value="setback"
+                  >${localize("devices.idle_action_setback", lang)}</ha-list-item
                 >
               </ha-select>
               ${device.idle_action === "low"

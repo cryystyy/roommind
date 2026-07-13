@@ -334,14 +334,23 @@ async def test_mpc_apply_call_hvac_off_uses_idle_action():
     """Verify _call('set_hvac_mode', hvac_mode='off') delegates to async_idle_device."""
     _last_commands.clear()
     hass = build_hass()
-    state = MagicMock()
-    state.state = "cool"
-    state.attributes = {
+    ac_state = MagicMock()
+    ac_state.state = "cool"
+    ac_state.attributes = {
         "hvac_modes": ["cool", "fan_only", "off"],
         "fan_modes": ["low"],
         "temperature": 23.0,
     }
-    hass.states.get = MagicMock(return_value=state)
+    # The TRV must be heat-only: a cool-capable trv-typed device would now be
+    # driven with cooling instead of idled (see test_cooling_decision.py).
+    trv_state = MagicMock()
+    trv_state.state = "heat"
+    trv_state.attributes = {
+        "hvac_modes": ["heat", "fan_only", "off"],
+        "fan_modes": ["low"],
+        "temperature": 23.0,
+    }
+    hass.states.get = MagicMock(side_effect=lambda eid: trv_state if eid == "climate.trv1" else ac_state)
 
     # Room with TRV + AC. During cooling, TRVs get "off" via _call.
     # If the TRV has idle_action=fan_only, it should get fan_only.

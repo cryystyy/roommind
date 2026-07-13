@@ -134,6 +134,8 @@ def simulate_prediction(
     all_points: list[dict],
     solar_series: list[float] | None = None,
     acs_can_heat: bool = False,
+    trvs_can_cool: bool = False,
+    trvs_can_heat: bool | None = None,
     q_residual: float = 0.0,
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
@@ -160,6 +162,8 @@ def simulate_prediction(
             settings,
             solar_series=solar_series,
             acs_can_heat=acs_can_heat,
+            trvs_can_cool=trvs_can_cool,
+            trvs_can_heat=trvs_can_heat,
             q_residual=q_residual,
             heating_system_type=heating_system_type,
             heating_duration_minutes=heating_duration_minutes,
@@ -176,6 +180,8 @@ def simulate_prediction(
         all_points,
         solar_series=solar_series,
         acs_can_heat=acs_can_heat,
+        trvs_can_cool=trvs_can_cool,
+        trvs_can_heat=trvs_can_heat,
         q_residual=q_residual,
         heating_system_type=heating_system_type,
         heating_duration_minutes=heating_duration_minutes,
@@ -212,6 +218,8 @@ def _simulate_mpc(
     *,
     solar_series: list[float] | None = None,
     acs_can_heat: bool = False,
+    trvs_can_cool: bool = False,
+    trvs_can_heat: bool | None = None,
     q_residual: float = 0.0,
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
@@ -221,7 +229,15 @@ def _simulate_mpc(
     """Rolling-horizon MPC simulation matching the real controller."""
     ocm = settings.get("outdoor_cooling_min", DEFAULT_OUTDOOR_COOLING_MIN)
     ohm = settings.get("outdoor_heating_max", DEFAULT_OUTDOOR_HEATING_MAX)
-    can_heat, can_cool = get_can_heat_cool(room_config, None, ocm, ohm, acs_can_heat=acs_can_heat)
+    can_heat, can_cool = get_can_heat_cool(
+        room_config,
+        None,
+        ocm,
+        ohm,
+        acs_can_heat=acs_can_heat,
+        trvs_can_cool=trvs_can_cool,
+        trvs_can_heat=trvs_can_heat,
+    )
     cw = settings.get("comfort_weight", 70)
 
     min_run = get_min_run_blocks(heating_system_type, 5.0)
@@ -365,6 +381,8 @@ def _simulate_bangbang(
     *,
     solar_series: list[float] | None = None,
     acs_can_heat: bool = False,
+    trvs_can_cool: bool = False,
+    trvs_can_heat: bool | None = None,
     q_residual: float = 0.0,
     heating_system_type: str = "",
     heating_duration_minutes: float = 0.0,
@@ -373,8 +391,10 @@ def _simulate_bangbang(
 ) -> list[float]:
     """Bang-bang fallback simulation with mode stickiness + idle rate cap."""
     observed_idle_rate = compute_observed_idle_rate(all_points)
-    has_heat = bool(get_trv_eids(room_config.get("devices", []))) or acs_can_heat
-    has_cool = bool(get_ac_eids(room_config.get("devices", [])))
+    if trvs_can_heat is None:
+        trvs_can_heat = bool(get_trv_eids(room_config.get("devices", [])))
+    has_heat = trvs_can_heat or acs_can_heat
+    has_cool = bool(get_ac_eids(room_config.get("devices", []))) or trvs_can_cool
 
     min_run = get_min_run_blocks(heating_system_type, 5.0)
 

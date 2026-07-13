@@ -43,6 +43,8 @@ from ..utils.device_utils import (
     get_idle_action,
     get_trv_eids,
     has_reliable_hvac_modes,
+    state_is_cool_only,
+    state_supports_heating,
 )
 from ..utils.temp_utils import celsius_delta_to_ha, celsius_to_ha_temp
 from .mpc_optimizer import MPCOptimizer, MPCPlan
@@ -101,6 +103,23 @@ def clear_command_cache() -> None:
     _setpoint_override_warned.clear()
 
 
+def _is_cooling_idle_context(state: Any) -> bool:
+    """True when idling this device means releasing COOLING demand.
+
+    A device actively cooling, or one whose only active capability is
+    cooling (e.g. a TABS zone reporting ["off", "cool"] in summer), idles
+    toward max_temp.  Everything else keeps the heating direction
+    (min_temp = valve closed).
+    """
+    if state is None:
+        return False
+    if state.state == "cool":
+        return True
+    if state.state in ("heat", "heat_cool", "auto"):
+        return False
+    return state_is_cool_only(state)
+
+
 def _resolve_idle_setpoint(
     state: Any,
     fallback_setpoint: float | None,
@@ -110,29 +129,33 @@ def _resolve_idle_setpoint(
 ) -> float | None:
     """Pick the best setpoint to idle a device.
 
-    Returns min_temp when available (authoritative device floor),
-    otherwise fallback_setpoint. Returns None if neither works.
+    Heating devices idle at min_temp (valve closed).  Cooling devices idle
+    at max_temp — min_temp on a cooling device is MAXIMUM cooling demand
+    and would overcool the room.  Falls back to fallback_setpoint when the
+    device limit is unavailable.  Returns None if neither works.
     """
-    min_temp: float | None = None
+    limit_temp: float | None = None
     if state:
-        raw = state.attributes.get("min_temp")
+        limit_attr = "max_temp" if _is_cooling_idle_context(state) else "min_temp"
+        raw = state.attributes.get(limit_attr)
         if raw is not None:
             try:
                 val = float(raw)
             except (ValueError, TypeError):
                 val = -1.0
             if val > 0:
-                min_temp = val
+                limit_temp = val
             elif fallback_setpoint is None:
                 _LOGGER.warning(
-                    "Area '%s': device '%s' reports min_temp=%s (<= 0), "
-                    "no fallback available — cannot lower setpoint (Z2M/firmware bug?)",
+                    "Area '%s': device '%s' reports %s=%s (<= 0), "
+                    "no fallback available — cannot idle setpoint (Z2M/firmware bug?)",
                     area_id,
                     entity_id,
+                    limit_attr,
                     raw,
                 )
 
-    return min_temp if min_temp is not None else fallback_setpoint
+    return limit_temp if limit_temp is not None else fallback_setpoint
 
 
 async def _send_idle_setpoint(
@@ -254,7 +277,8 @@ async def async_turn_off_climate(
             cached = _last_commands.get(entity_id)
             if cached and cached.get("service") == "set_hvac_mode" and cached.get("hvac_mode") == "off":
                 return
-        # Defense-in-depth: lower setpoint to min_temp BEFORE sending "off".
+        # Defense-in-depth: move setpoint to the no-demand end of the range
+        # (min_temp for heating, max_temp for cooling) BEFORE sending "off".
         # Some devices (e.g. Wavin AHC9000) claim "off" support but only
         # process temperature changes when in "heat" mode.  Sending the setpoint
         # first (while the device is still active) ensures the valve closes even
@@ -380,21 +404,29 @@ async def async_idle_device(
     "off"      -> async_turn_off_climate() (existing behavior)
     "fan_only" -> hvac_mode=fan_only + set_fan_mode(idle_fan_mode)
     "setback"  -> keep current hvac_mode, shift target by offset
-    "low"      -> lower setpoint to device min_temp, never send set_hvac_mode(off)
+    "low"      -> setpoint to device min_temp (heating) or max_temp
+                  (cooling), never send set_hvac_mode(off)
     Falls back to off when the configured action is not applicable.
     """
     idle_action, idle_fan_mode = get_idle_action(devices, entity_id)
 
-    # Fallback low setpoint (in HA display units) for devices where min_temp
-    # is not effective (e.g. Wavin Sentio with min_temp=0 or high min_temp).
+    # Fallback idle setpoint (in HA display units) for devices whose own
+    # limit is not usable (e.g. Wavin Sentio with min_temp=0).  Direction
+    # depends on the device's role: heating devices idle below the heat
+    # target, cooling devices idle above the cool target.
     fallback_temp: float | None = None
-    if targets is not None and targets.heat is not None:
-        fallback_temp = celsius_to_ha_temp(hass, targets.heat - DEFAULT_IDLE_SETBACK_OFFSET)
+    if targets is not None:
+        if _is_cooling_idle_context(hass.states.get(entity_id)):
+            if targets.cool is not None:
+                fallback_temp = celsius_to_ha_temp(hass, targets.cool + DEFAULT_IDLE_SETBACK_OFFSET)
+        elif targets.heat is not None:
+            fallback_temp = celsius_to_ha_temp(hass, targets.heat - DEFAULT_IDLE_SETBACK_OFFSET)
 
     # --- LOW branch ---
     # Some TRVs (e.g. battery Zigbee valves) enter deep-sleep hibernation after
     # extended time in hvac_mode=off, causing later wake-up commands to be lost.
-    # "low" keeps the device out of off-mode by only lowering the setpoint.
+    # "low" keeps the device out of off-mode by only shifting the setpoint to
+    # the no-demand end of the device range.
     if idle_action == IDLE_ACTION_LOW:
         state = hass.states.get(entity_id)
         if state is None:
@@ -632,6 +664,32 @@ def check_acs_can_heat(hass: HomeAssistant, room_config: dict) -> bool:
     return False
 
 
+def check_trvs_can_cool(hass: HomeAssistant, room_config: dict) -> bool:
+    """Check if any thermostat entity in the room supports cooling.
+
+    Thermostat-typed devices on reversible systems (e.g. Rehau TABS zones)
+    report hvac_modes like ["off", "cool"] in cooling season and must be
+    allowed to cool even though their configured type is "trv".
+    """
+    for eid in get_trv_eids(room_config.get("devices", [])):
+        if state_is_cool_only(hass.states.get(eid)):
+            return True
+    return False
+
+
+def check_trvs_can_heat(hass: HomeAssistant, room_config: dict) -> bool:
+    """Check if any thermostat entity in the room may support heating.
+
+    Unavailable devices or unreliable mode lists count as heat-capable
+    (legacy assumption); only reliably heat-less mode lists deny heating.
+    Returns False when the room has no thermostat devices.
+    """
+    for eid in get_trv_eids(room_config.get("devices", [])):
+        if state_supports_heating(hass.states.get(eid)):
+            return True
+    return False
+
+
 def get_can_heat_cool(
     room_config: dict,
     outdoor_temp: float | None = None,
@@ -640,6 +698,8 @@ def get_can_heat_cool(
     acs_can_heat: bool = False,
     *,
     override_active: bool = False,
+    trvs_can_cool: bool = False,
+    trvs_can_heat: bool | None = None,
 ) -> tuple[bool, bool]:
     """Determine whether heating/cooling are allowed for a room.
 
@@ -650,14 +710,22 @@ def get_can_heat_cool(
     When *acs_can_heat* is True, ACs that support heating (heat pumps)
     contribute to the heating capability of the room.
 
+    When *trvs_can_cool* is True, thermostat-typed devices that support
+    cooling (reversible systems, e.g. TABS zones) contribute to the cooling
+    capability of the room.  *trvs_can_heat* refines the legacy assumption
+    that thermostat presence implies heating; None keeps that assumption.
+
     When *override_active* is True, outdoor temperature gating is bypassed
     because the user has explicitly requested a specific target temperature.
     """
     climate_mode = room_config.get("climate_mode", "auto")
-    can_heat = climate_mode != CLIMATE_MODE_COOL_ONLY and (
-        bool(get_trv_eids(room_config.get("devices", []))) or acs_can_heat
+    if trvs_can_heat is None:
+        # Legacy default: TRV presence implies heating capability
+        trvs_can_heat = bool(get_trv_eids(room_config.get("devices", [])))
+    can_heat = climate_mode != CLIMATE_MODE_COOL_ONLY and (trvs_can_heat or acs_can_heat)
+    can_cool = climate_mode != CLIMATE_MODE_HEAT_ONLY and (
+        bool(get_ac_eids(room_config.get("devices", []))) or trvs_can_cool
     )
-    can_cool = climate_mode != CLIMATE_MODE_HEAT_ONLY and bool(get_ac_eids(room_config.get("devices", [])))
 
     if outdoor_temp is not None and not override_active:
         if outdoor_temp > outdoor_heating_max:
@@ -1067,6 +1135,8 @@ class MPCController:
             self.outdoor_heating_max,
             acs_can_heat=check_acs_can_heat(self.hass, self.room_config),
             override_active=_override,
+            trvs_can_cool=check_trvs_can_cool(self.hass, self.room_config),
+            trvs_can_heat=check_trvs_can_heat(self.hass, self.room_config),
         )
 
         if self.outdoor_temp is not None:
@@ -1554,7 +1624,10 @@ class MPCController:
                 ac_cool_target = effective_target
             ha_target = celsius_to_ha_temp(self.hass, ac_cool_target)
             ha_cool_direct = celsius_to_ha_temp(self.hass, effective_target)
-            for eid in self.acs:
+            # Thermostat-typed devices on reversible systems (e.g. TABS zones
+            # reporting ["off", "cool"]) are driven like ACs in cooling mode.
+            cool_trvs = [eid for eid in thermostats if state_is_cool_only(self.hass.states.get(eid))]
+            for eid in self.acs + cool_trvs:
                 if eid in _forced_off:
                     await async_idle_device(self.hass, eid, self._devices, area_id=self._area_id, targets=targets)
                     continue
@@ -1567,6 +1640,8 @@ class MPCController:
                     deadband=self._proportional_deadband(eid, current_temp, effective_target),
                 )
             for eid in thermostats:
+                if eid in cool_trvs:
+                    continue
                 if eid in _forced_off:
                     await async_idle_device(self.hass, eid, self._devices, area_id=self._area_id, targets=targets)
                     continue

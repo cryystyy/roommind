@@ -20,6 +20,8 @@ from ..const import (
 from ..control.mpc_controller import (
     DEFAULT_OUTDOOR_TEMP_FALLBACK,
     check_acs_can_heat,
+    check_trvs_can_cool,
+    check_trvs_can_heat,
     get_can_heat_cool,
     is_mpc_active,
 )
@@ -226,6 +228,8 @@ async def build_analytics_data(
                     room_config,
                     coordinator.outdoor_temp_effective,
                     acs_can_heat=check_acs_can_heat(hass, room_config),
+                    trvs_can_cool=check_trvs_can_cool(hass, room_config),
+                    trvs_can_heat=check_trvs_can_heat(hass, room_config),
                 )
                 T_out = (
                     coordinator.outdoor_temp_effective
@@ -354,6 +358,8 @@ async def build_analytics_data(
                         all_points=all_points,
                         solar_series=solar_series,
                         acs_can_heat=check_acs_can_heat(hass, room_config),
+                        trvs_can_cool=check_trvs_can_cool(hass, room_config),
+                        trvs_can_heat=check_trvs_can_heat(hass, room_config),
                         q_residual=sim_q_residual,
                         heating_system_type=system_type,
                         heating_duration_minutes=sim_heat_dur,
