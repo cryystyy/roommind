@@ -1,14 +1,9 @@
 {
   "domain": "roommind",
   "name": "RoomMind",
-  "codeowners": [
-    "@snazzybean"
-  ],
+  "codeowners": ["@snazzybean"],
   "config_flow": true,
-  "dependencies": [
-    "http",
-    "frontend"
-  ],
+  "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/snazzybean/roommind",
   "integration_type": "hub",
   "iot_class": "local_polling",
