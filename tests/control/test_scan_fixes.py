@@ -60,6 +60,34 @@ class TestSolarTimeWrap:
         assert 0.0 <= az1 < 360.0
 
 
+class TestColdStartPriors:
+    def test_tabs_prior_slower_than_default(self):
+        from custom_components.roommind.control.thermal_model import ThermalEKF
+
+        default = ThermalEKF()
+        tabs = ThermalEKF(system_type="tabs")
+        ufh = ThermalEKF(system_type="underfloor")
+        # High-thermal-mass systems start with lower loss/drive rates
+        assert tabs._x[1] < ufh._x[1] < default._x[1]  # alpha
+        assert tabs._x[2] < ufh._x[2] < default._x[2]  # beta_h
+        assert tabs._x[3] < ufh._x[3] < default._x[3]  # beta_c
+
+    def test_unknown_type_uses_defaults(self):
+        from custom_components.roommind.control.thermal_model import ThermalEKF
+
+        assert ThermalEKF(system_type="radiator")._x == ThermalEKF()._x
+
+    def test_persisted_model_not_reseeded(self):
+        from custom_components.roommind.control.thermal_model import RoomModelManager
+
+        mgr = RoomModelManager()
+        est = mgr.get_estimator("room", "tabs")
+        restored = RoomModelManager.from_dict(mgr.to_dict())
+        # Restoring keeps the persisted state; a later typed get is a no-op
+        est2 = restored.get_estimator("room", "radiator")
+        assert est2._x == est._x
+
+
 class TestDecayResidualHeat:
     def test_decays_over_time(self):
         q0 = 0.5

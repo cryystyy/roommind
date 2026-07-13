@@ -295,12 +295,26 @@ class ThermalEKF:
     # Number of state dimensions
     _N: int = 6
 
-    def __init__(self, T_init: float = 20.0) -> None:
+    # Cold-start parameter priors per heating system type (C=1 normalization,
+    # tuples of (alpha, beta_h, beta_c)).  High-thermal-mass systems respond
+    # slower: lower loss rate behind the sensor and lower effective drive
+    # rates.  Covariance is unchanged so the filter still converges to the
+    # room's real values — the prior only removes the first days of
+    # mis-predicted bang-bang while learning.  Radiator/"" keep the defaults.
+    _SYSTEM_PRIORS: dict[str, tuple[float, float, float]] = {
+        "underfloor": (0.10, 1.5, 2.0),
+        "tabs": (0.05, 0.8, 1.0),
+    }
+
+    def __init__(self, T_init: float = 20.0, system_type: str = "") -> None:
+        alpha0, beta_h0, beta_c0 = self._SYSTEM_PRIORS.get(
+            system_type, (self._DEFAULT_ALPHA, self._DEFAULT_BETA_H, self._DEFAULT_BETA_C)
+        )
         self._x: list[float] = [
             T_init,
-            self._DEFAULT_ALPHA,
-            self._DEFAULT_BETA_H,
-            self._DEFAULT_BETA_C,
+            alpha0,
+            beta_h0,
+            beta_c0,
             self._DEFAULT_BETA_S,
             self._DEFAULT_BETA_O,
         ]
@@ -988,10 +1002,15 @@ class RoomModelManager:
         """Return list of room IDs with learned models."""
         return list(self._estimators.keys())
 
-    def get_estimator(self, area_id: str) -> ThermalEKF:
-        """Return the estimator for *area_id*, creating one if needed."""
+    def get_estimator(self, area_id: str, system_type: str = "") -> ThermalEKF:
+        """Return the estimator for *area_id*, creating one if needed.
+
+        *system_type* only matters at creation time: it selects cold-start
+        parameter priors (see ThermalEKF._SYSTEM_PRIORS).  Persisted models
+        restored via from_dict are never re-seeded.
+        """
         if area_id not in self._estimators:
-            self._estimators[area_id] = ThermalEKF()
+            self._estimators[area_id] = ThermalEKF(system_type=system_type)
         return self._estimators[area_id]
 
     def update(

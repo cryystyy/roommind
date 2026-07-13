@@ -141,6 +141,9 @@ _SETTINGS_SAVE_FIELDS = (
     "room_order",
     "group_by_floor",
     "compressor_groups",
+    "feels_like_enabled",
+    "dewpoint_guard_enabled",
+    "dewpoint_margin",
 )
 
 
@@ -642,6 +645,9 @@ async def websocket_get_settings(
         ],
         vol.Optional("room_order"): [str],
         vol.Optional("group_by_floor"): bool,
+        vol.Optional("feels_like_enabled"): bool,
+        vol.Optional("dewpoint_guard_enabled"): bool,
+        vol.Optional("dewpoint_margin"): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5.0)),
         vol.Optional("compressor_groups"): [
             {
                 vol.Required("id"): str,

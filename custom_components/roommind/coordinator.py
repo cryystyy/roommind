@@ -21,10 +21,13 @@ from .const import (
     CLIMATE_MODE_HEAT_ONLY,
     DEFAULT_COMFORT_COOL,
     DEFAULT_COMFORT_HEAT,
+    DEFAULT_DEWPOINT_MARGIN,
     DEFAULT_ECO_COOL,
     DEFAULT_ECO_HEAT,
     DEFAULT_OUTDOOR_HEATING_MAX,
     DOMAIN,
+    FEELS_LIKE_COEFF,
+    FEELS_LIKE_MAX_DELTA,
     HEATING_BOOST_TARGET,
     HISTORY_ROTATE_CYCLES,
     HISTORY_WRITE_CYCLES,
@@ -79,6 +82,7 @@ from .utils.device_utils import (
     state_is_cool_only,
 )
 from .utils.history_store import HistoryStore
+from .utils.mold_utils import dew_point
 from .utils.schedule_utils import resolve_schedule_index
 from .utils.sensor_utils import read_sensor_value
 from .utils.temp_utils import celsius_delta_to_ha, ha_temp_to_celsius, ha_temp_unit_str
@@ -617,6 +621,50 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 _dt = _dev.get("heating_system_type") or ""
                 if _hst_prio.get(_dt, 0) > _hst_prio.get(system_type, 0):
                     system_type = _dt
+        # Create the estimator with system-type cold-start priors before any
+        # other manager call lazily creates it with defaults (no-op once it
+        # exists or was restored from persisted thermal data).
+        self._model_manager.get_estimator(area_id, system_type)
+
+        # --- Humidity-aware cooling: feels-like bias + dew-point guard ---
+        room_dew_point: float | None = None
+        if current_temp is not None and current_humidity is not None:
+            room_dew_point = dew_point(current_temp, current_humidity)
+
+        # Feels-like (opt-in): humid rooms feel warmer than the sensor reads —
+        # bias the effective cool target down (and up on dry days), clamped.
+        feels_like_delta = 0.0
+        if settings.get("feels_like_enabled", False) and current_humidity is not None:
+            feels_like_delta = max(
+                -FEELS_LIKE_MAX_DELTA,
+                min(FEELS_LIKE_MAX_DELTA, (current_humidity - 50.0) / 10.0 * FEELS_LIKE_COEFF),
+            )
+            feels_like_delta = round(feels_like_delta, 2)
+        if feels_like_delta and targets.cool is not None:
+            _fl_cool = round(targets.cool - feels_like_delta, 2)
+            targets = TargetTemps(
+                heat=targets.heat if targets.heat is None else min(targets.heat, _fl_cool),
+                cool=_fl_cool,
+            )
+            _base_resolver = target_resolver
+            _fl_delta = feels_like_delta
+
+            def _feels_like_resolver(ts: float) -> TargetTemps:
+                t = _base_resolver(ts)
+                if t.cool is not None:
+                    nc = t.cool - _fl_delta
+                    return TargetTemps(heat=t.heat if t.heat is None else min(t.heat, nc), cool=nc)
+                return t
+
+            target_resolver = _feels_like_resolver
+
+        # Dew-point condensation guard: radiant surfaces (TABS/underfloor)
+        # must never be driven below the room dew point.  Complements (does
+        # not replace) any installer-level supply-water dew-point reset.
+        dewpoint_guard = settings.get("dewpoint_guard_enabled", True) and system_type in ("tabs", "underfloor")
+        dewpoint_margin = settings.get("dewpoint_margin", DEFAULT_DEWPOINT_MARGIN)
+        cooling_limited = ""
+
         q_residual = self._residual_tracker.get_q_residual(
             area_id,
             system_type,
@@ -659,6 +707,27 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             q_occupancy=q_occupancy,
         )
         mode, power_fraction = await controller.async_evaluate(current_temp, targets)
+
+        # Dew-point hard cut: when room air is within the safety margin of the
+        # dew point, any radiant surface colder than the air condenses — stop
+        # active cooling entirely until humidity drops.
+        if (
+            dewpoint_guard
+            and mode == MODE_COOLING
+            and room_dew_point is not None
+            and current_temp is not None
+            and current_temp - room_dew_point < dewpoint_margin
+        ):
+            _LOGGER.info(
+                "Room '%s': cooling suppressed by dew-point guard (room %.1f°C, dew point %.1f°C, margin %.1f°C)",
+                area_id,
+                current_temp,
+                room_dew_point,
+                dewpoint_margin,
+            )
+            mode = MODE_IDLE
+            power_fraction = 0.0
+            cooling_limited = "dew_point"
 
         # Room capabilities (state-aware): reused for target display and mpc_active
         room_can_heat, room_can_cool = get_can_heat_cool(
@@ -761,6 +830,16 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 ac_min_temps.append(ha_temp_to_celsius(self.hass, st.attributes["min_temp"]))
         device_min_temp = max(ac_min_temps) if ac_min_temps else None
         ac_device_max_temp = min(ac_max_temps) if ac_max_temps else None
+
+        # Dew-point floor on the cooling boost: never command a radiant zone
+        # setpoint below dew point + margin, even at full power.
+        if dewpoint_guard and room_dew_point is not None:
+            _dp_floor = round(room_dew_point + dewpoint_margin, 1)
+            device_min_temp = max(
+                device_min_temp if device_min_temp is not None else AC_COOLING_BOOST_TARGET, _dp_floor
+            )
+            if targets.cool is not None and _dp_floor >= targets.cool and not cooling_limited:
+                cooling_limited = "dew_point_floor"
 
         # Exclude TRVs currently being valve-protection-cycled from normal control
         cycling_eids = {
@@ -1006,6 +1085,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             cover_eids=cover_eids,
             cover_result=cover_result,
             mpc_active=mpc_active,
+            room_dew_point=room_dew_point,
+            cooling_limited=cooling_limited,
+            feels_like_delta=feels_like_delta,
         )
 
     async def _observe_and_train(
@@ -1277,6 +1359,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         cover_eids: list[str],
         cover_result: CoverResult,
         mpc_active: bool,
+        room_dew_point: float | None = None,
+        cooling_limited: str = "",
+        feels_like_delta: float = 0.0,
     ) -> dict:
         """Build the final room state dictionary."""
         _room_devices = room.get("devices", [])
@@ -1284,9 +1369,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         _devs_with_eid = [d for d in _room_devices if d.get("entity_id")]
         _all_direct = bool(_devs_with_eid) and len(_direct_eids) == len(_devs_with_eid)
 
-        _direction = self._resolve_display_direction(
-            room, display_mode, mode, targets, current_temp
-        )
+        _direction = self._resolve_display_direction(room, display_mode, mode, targets, current_temp)
 
         return {
             "area_id": area_id,
@@ -1296,6 +1379,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "target_temp": target_temp,
             "heat_target": targets.heat,
             "cool_target": targets.cool,
+            "dew_point": (round(room_dew_point, 1) if room_dew_point is not None else None),
+            "cooling_limited": cooling_limited,
+            "feels_like_delta": feels_like_delta,
             "mode": display_mode,
             "direction": _direction,
             "commanded_mode": mode,

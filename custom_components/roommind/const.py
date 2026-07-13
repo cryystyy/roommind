@@ -85,6 +85,11 @@ AC_BOOST_DELTA_MAX = 50.0  # Comfort-end AC cap (°C); finite value above any re
 PROPORTIONAL_DEADBAND_C = 0.5  # Minimum proportional setpoint change (°C) to resend, in the gentle regime
 PROPORTIONAL_DEADBAND_NEAR_TARGET_C = 0.2  # Finer proportional deadband (°C) within 1°C of target
 
+# Humidity-aware cooling
+FEELS_LIKE_COEFF = 0.35  # °C cool-target bias per 10% RH away from 50% (opt-in feature)
+FEELS_LIKE_MAX_DELTA = 1.5  # clamp for the feels-like bias (°C)
+DEFAULT_DEWPOINT_MARGIN = 2.0  # °C safety margin above dew point for radiant cooling
+
 # Update interval in seconds
 UPDATE_INTERVAL = 30
 
