@@ -403,13 +403,25 @@ export class RsHeroStatus extends LitElement {
 
     if (targetTemp !== null || (live.heat_target != null && live.cool_target != null)) {
       const climateMode = this.config?.climate_mode ?? "auto";
+      const dir = live.direction;
+      // In Auto, headline the target for the active direction so we never
+      // show the opposite-season setpoint as "the target".
+      const dirTarget =
+        climateMode === "auto" && dir === "cooling"
+          ? live.cool_target
+          : climateMode === "auto" && dir === "heating"
+            ? live.heat_target
+            : null;
       const showRange =
+        dirTarget == null &&
         climateMode === "auto" &&
         live.heat_target != null &&
         live.cool_target != null &&
         live.heat_target !== live.cool_target;
 
-      const display = showRange
+      const display = dirTarget != null
+        ? html`${formatTemp(dirTarget, this.hass)}${tempUnit(this.hass)}`
+        : showRange
         ? html`${formatTemp(live.heat_target!, this.hass)} –
           ${formatTemp(live.cool_target!, this.hass)}${tempUnit(this.hass)}`
         : html`${formatTemp((targetTemp ?? live.heat_target)!, this.hass)}${tempUnit(this.hass)}`;
@@ -532,6 +544,12 @@ export class RsHeroStatus extends LitElement {
                             this.hass?.language ?? "en",
                           )}${live.heating_power > 0 && live.heating_power < 100
                             ? html` ${live.heating_power}%`
+                            : nothing}${(this.config?.climate_mode ?? "auto") === "auto" &&
+                          live.mode === "idle" &&
+                          live.direction
+                            ? html` - ${live.direction === "cooling"
+                                ? localize("mode.cooling", this.hass?.language ?? "en")
+                                : localize("mode.heating", this.hass?.language ?? "en")}`
                             : nothing}
                         </span>
                       `

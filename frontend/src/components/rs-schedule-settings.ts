@@ -35,6 +35,8 @@ export class RsScheduleSettings extends RsScheduleBase {
   @property({ type: Number }) public ecoHeat = 17.0;
   @property({ type: Number }) public ecoCool = 27.0;
   @property({ type: String }) public climateMode: ClimateMode = "auto";
+  /** Live cooling/heating orientation (used in Auto to pick which target to show). */
+  @property({ type: String }) public direction: "cooling" | "heating" | "" = "";
 
   static styles = [
     RsScheduleBase.sharedStyles,
@@ -385,6 +387,16 @@ export class RsScheduleSettings extends RsScheduleBase {
 
   // ─── Status text (temperature-specific) ────────────────────────
 
+  /**
+   * Pick the comfort/eco value for the active direction.
+   * cool_only -> cool, heat_only -> heat, auto -> follow live direction.
+   */
+  private _pickByDirection(cool: number, heat: number): number {
+    if (this.climateMode === "cool_only") return cool;
+    if (this.climateMode === "heat_only") return heat;
+    return this.direction === "cooling" ? cool : heat;
+  }
+
   private _getStatusText(index: number, state: "active" | "inactive" | "unreachable"): string {
     const l = this.hass.language;
 
@@ -416,7 +428,7 @@ export class RsScheduleSettings extends RsScheduleBase {
       }
       return localize("schedule.fallback", l, {
         temp: formatTemp(
-          this.climateMode === "cool_only" ? this.comfortCool : this.comfortHeat,
+          this._pickByDirection(this.comfortCool, this.comfortHeat),
           this.hass,
         ),
         unit: tempUnit(this.hass),
@@ -424,7 +436,7 @@ export class RsScheduleSettings extends RsScheduleBase {
     }
 
     return localize("schedule.eco_detail", l, {
-      temp: formatTemp(this.climateMode === "cool_only" ? this.ecoCool : this.ecoHeat, this.hass),
+      temp: formatTemp(this._pickByDirection(this.ecoCool, this.ecoHeat), this.hass),
       unit: tempUnit(this.hass),
     });
   }

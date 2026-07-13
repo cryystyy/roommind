@@ -1189,6 +1189,53 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         return display_mode, display_pf
 
+    def _resolve_display_direction(
+        self,
+        room: dict,
+        display_mode: str,
+        commanded_mode: str,
+        targets: TargetTemps,
+        current_temp: float | None,
+    ) -> str:
+        """Display-only: is the room oriented to cooling or heating?
+
+        NOT used for any control decision -- it only drives the UI badge and
+        which comfort/eco target the panel headlines in Auto mode.
+        """
+        if display_mode == MODE_COOLING:
+            return "cooling"
+        if display_mode == MODE_HEATING:
+            return "heating"
+        cmode = room.get("climate_mode", "auto")
+        if cmode == CLIMATE_MODE_COOL_ONLY:
+            return "cooling"
+        if cmode == CLIMATE_MODE_HEAT_ONLY:
+            return "heating"
+        if commanded_mode == MODE_COOLING:
+            return "cooling"
+        if commanded_mode == MODE_HEATING:
+            return "heating"
+        # Auto + idle: infer the season from outdoor temp relative to the
+        # targets, else from where the room sits between them.
+        outdoor = self.outdoor_temp_effective
+        heat_t = targets.heat
+        cool_t = targets.cool
+        if heat_t is not None and cool_t is not None:
+            if outdoor is not None:
+                if outdoor >= cool_t:
+                    return "cooling"
+                if outdoor <= heat_t:
+                    return "heating"
+            mid = (heat_t + cool_t) / 2.0
+            ref = current_temp if current_temp is not None else outdoor
+            if ref is not None:
+                return "cooling" if ref >= mid else "heating"
+        if cool_t is not None and heat_t is None:
+            return "cooling"
+        if heat_t is not None and cool_t is None:
+            return "heating"
+        return "cooling"
+
     def _build_room_state_dict(
         self,
         *,
@@ -1228,6 +1275,10 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         _devs_with_eid = [d for d in _room_devices if d.get("entity_id")]
         _all_direct = bool(_devs_with_eid) and len(_direct_eids) == len(_devs_with_eid)
 
+        _direction = self._resolve_display_direction(
+            room, display_mode, mode, targets, current_temp
+        )
+
         return {
             "area_id": area_id,
             "current_temp": current_temp,
@@ -1237,6 +1288,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "heat_target": targets.heat,
             "cool_target": targets.cool,
             "mode": display_mode,
+            "direction": _direction,
             "commanded_mode": mode,
             "heating_power": round(display_pf * 100) if display_mode != MODE_IDLE else 0,
             "device_setpoint": self._compute_device_setpoint_orchestrated(

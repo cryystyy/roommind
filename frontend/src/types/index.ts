@@ -30,6 +30,7 @@ export interface RoomLiveData {
   heat_target: number | null;
   cool_target: number | null;
   mode: RoomMode;
+  direction?: "cooling" | "heating"; // display-only: current cool/heat orientation
   heating_power: number; // 0-100
   device_setpoint: number | null; // Device target temp in Full Control mode
   override_active: boolean;

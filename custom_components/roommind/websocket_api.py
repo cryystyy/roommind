@@ -237,6 +237,7 @@ async def websocket_list_rooms(
             "heat_target": live.get("heat_target"),
             "cool_target": live.get("cool_target"),
             "mode": live.get("mode", "idle"),
+            "direction": live.get("direction"),
             "heating_power": live.get("heating_power", 0),
             "device_setpoint": live.get("device_setpoint"),
             "window_open": live.get("window_open", False),
