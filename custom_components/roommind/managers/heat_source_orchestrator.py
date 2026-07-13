@@ -189,8 +189,16 @@ def evaluate_heat_sources(
     elif prefer_ac is False:
         active = "primary"
     else:
-        # No outdoor data: delta-T heuristic (backward compatible)
-        active = "primary" if delta_t >= primary_delta + HEAT_SOURCE_HYSTERESIS else "secondary"
+        # No outdoor data: delta-T heuristic with a hysteresis band anchored
+        # to the previous selection, so sensor noise around the threshold
+        # doesn't flap the active source every 30 s cycle.
+        threshold = primary_delta + HEAT_SOURCE_HYSTERESIS
+        if previous_active_sources == "primary":
+            active = "primary" if delta_t >= threshold - HEAT_SOURCE_HYSTERESIS else "secondary"
+        elif previous_active_sources == "secondary":
+            active = "primary" if delta_t >= threshold + HEAT_SOURCE_HYSTERESIS else "secondary"
+        else:
+            active = "primary" if delta_t >= threshold else "secondary"
 
     # Edge case: if chosen group has no devices, fall back
     if active == "secondary" and not secondary_devices:

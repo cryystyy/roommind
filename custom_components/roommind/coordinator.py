@@ -582,14 +582,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             if force_off:
                 eco_heat = room.get("eco_heat", room.get("eco_temp", DEFAULT_ECO_HEAT))
                 eco_cool = room.get("eco_cool", DEFAULT_ECO_COOL)
+                boosted = eco_heat + mold_prevention_temp_delta
                 targets = TargetTemps(
-                    heat=eco_heat + mold_prevention_temp_delta,
+                    # Never push the heating target above the cooling target —
+                    # an inverted band makes the controller oscillate.
+                    heat=min(boosted, eco_cool) if eco_cool is not None else boosted,
                     cool=eco_cool,
                 )
                 force_off = False
             elif targets.heat is not None:
+                boosted = targets.heat + mold_prevention_temp_delta
                 targets = TargetTemps(
-                    heat=targets.heat + mold_prevention_temp_delta,
+                    heat=min(boosted, targets.cool) if targets.cool is not None else boosted,
                     cool=targets.cool,
                 )
         presence_away = not room.get("ignore_presence", False) and self._is_presence_away(room, settings)
@@ -786,12 +790,18 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             # so re-enabling starts fresh.
             self._heat_source_states.pop(area_id, None)
 
-        # Compressor group constraints
+        # Compressor group constraints.  Deliberately NOT gated on window_open
+        # or force_off: those force mode=IDLE above, but check_must_stay_active
+        # (compressor min-run hardware protection) must still be consulted so
+        # group members are not shut off mid min-run.
         all_device_eids = get_all_entity_ids(room.get("devices", []))
+        cooling_capable_eids = set(get_ac_eids(room.get("devices", []))) | {
+            eid for eid in get_trv_eids(room.get("devices", [])) if state_is_cool_only(self.hass.states.get(eid))
+        }
         compressor_forced_on: set[str] = set()
         compressor_forced_off: set[str] = set()
 
-        if all_device_eids and climate_active and not window_open and not force_off:
+        if all_device_eids and climate_active:
             for eid in all_device_eids:
                 if self._compressor_manager.get_group_for_entity(eid) is None:
                     continue
@@ -813,14 +823,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             # TRVs must not prevent the IDLE transition when all cooling-capable
             # devices are blocked.  In heating mode both TRVs and ACs can
             # contribute, so the full device set applies.
-            if mode == MODE_COOLING:
-                _mode_relevant_eids = set(get_ac_eids(room.get("devices", []))) | {
-                    eid
-                    for eid in get_trv_eids(room.get("devices", []))
-                    if state_is_cool_only(self.hass.states.get(eid))
-                }
-            else:
-                _mode_relevant_eids = set(all_device_eids)
+            _mode_relevant_eids = cooling_capable_eids if mode == MODE_COOLING else set(all_device_eids)
             if compressor_forced_off and _mode_relevant_eids and compressor_forced_off >= _mode_relevant_eids:
                 mode = MODE_IDLE
                 power_fraction = 0.0
@@ -888,7 +891,17 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                     )
                     self._compressor_manager.update_member(eid, actually_on)
                 elif mode != MODE_IDLE:
-                    self._compressor_manager.update_member(eid, True)
+                    # Only devices the apply path actually drove count as
+                    # active — orchestration-idled devices and heat-only TRVs
+                    # in cooling mode were commanded off and must not extend
+                    # the group's min-run window.
+                    if heat_source_plan is not None:
+                        driven = any(c.entity_id == eid and c.active for c in heat_source_plan.commands)
+                    elif mode == MODE_COOLING:
+                        driven = eid in cooling_capable_eids
+                    else:
+                        driven = True
+                    self._compressor_manager.update_member(eid, driven)
                 else:
                     self._compressor_manager.update_member(eid, False)
 
@@ -910,6 +923,11 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         if mode == MODE_HEATING:
             excluded = set(room.get("valve_protection_exclude", []))
             heating_eids = [eid for eid in get_trv_eids(room.get("devices", [])) if eid not in excluded]
+            if heat_source_plan is not None:
+                # Orchestration may have idled some TRVs — only valves that
+                # actually moved count toward the anti-seize timer.
+                plan_active = {c.entity_id for c in heat_source_plan.commands if c.active}
+                heating_eids = [eid for eid in heating_eids if eid in plan_active]
             self._valve_manager.record_heating(heating_eids)
 
         mpc_active = False

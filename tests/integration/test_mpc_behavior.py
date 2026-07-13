@@ -67,8 +67,12 @@ def _make_schedule_blocks_at(hour: int, minute: int, duration_hours: int, day_na
     }
 
 
-# Frozen time: Monday 2026-03-09 10:00:00 (inside a typical schedule window)
-FROZEN_TS = datetime(2026, 3, 9, 10, 0, 0).timestamp()
+# Frozen time: Monday 2026-03-09 10:00:00 (inside a typical schedule window).
+# Explicitly in HA's timezone — schedule block matching uses
+# dt_util.DEFAULT_TIME_ZONE, not the OS-local zone.
+from homeassistant.util import dt as dt_util  # noqa: E402
+
+FROZEN_TS = datetime(2026, 3, 9, 10, 0, 0, tzinfo=dt_util.DEFAULT_TIME_ZONE).timestamp()
 
 # Schedule block that covers 06:00-22:00 on Monday (frozen time is inside it)
 ACTIVE_SCHEDULE = _make_schedule_blocks_at(6, 0, 16, "monday")

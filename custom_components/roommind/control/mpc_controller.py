@@ -24,6 +24,7 @@ from ..const import (
     DEFAULT_OUTDOOR_COOLING_MIN,
     DEFAULT_OUTDOOR_HEATING_MAX,
     HEATING_BOOST_TARGET,
+    MIN_POWER_FRACTION,
     MODE_COOLING,
     MODE_HEATING,
     MODE_IDLE,
@@ -66,15 +67,31 @@ _last_commands: dict[str, dict[str, Any]] = {}
 _setpoint_override_warned: set[str] = set()
 
 
-def _cache_entry(service: str, data: dict) -> dict[str, Any]:
-    """Build a cache entry from a service call."""
-    return {
-        "service": service,
-        "hvac_mode": data.get("hvac_mode"),
-        "temperature": data.get("temperature"),
-        "target_temp_low": data.get("target_temp_low"),
-        "target_temp_high": data.get("target_temp_high"),
-    }
+def _remember_command(entity_id: str, service: str, data: dict) -> None:
+    """Merge a successfully sent command into the per-entity cache.
+
+    Entries merge rather than overwrite: the alternating
+    set_hvac_mode/set_temperature pair sent every cycle must not evict each
+    other, or the cache never suppresses anything for the IR/stateless
+    devices it exists for.  A real hvac_mode change still invalidates the
+    cached setpoint so the next temperature command goes through.
+    """
+    entry = _last_commands.setdefault(entity_id, {})
+    entry["service"] = service
+    if data.get("hvac_mode") is not None:
+        if entry.get("hvac_mode") != data["hvac_mode"]:
+            entry.pop("temperature", None)
+            entry.pop("target_temp_low", None)
+            entry.pop("target_temp_high", None)
+        entry["hvac_mode"] = data["hvac_mode"]
+    if data.get("temperature") is not None:
+        entry["temperature"] = data["temperature"]
+        entry.pop("target_temp_low", None)
+        entry.pop("target_temp_high", None)
+    if data.get("target_temp_low") is not None or data.get("target_temp_high") is not None:
+        entry["target_temp_low"] = data.get("target_temp_low")
+        entry["target_temp_high"] = data.get("target_temp_high")
+        entry.pop("temperature", None)
 
 
 def _should_use_cache(state: Any) -> bool:
@@ -194,7 +211,6 @@ async def _send_idle_setpoint(
     cached = _last_commands.get(entity_id)
     if (
         cached
-        and cached.get("service") == "set_temperature"
         and cached.get("temperature") is not None
         and round(cached["temperature"], 1) == round(setpoint, 1)
         and current is not None
@@ -219,7 +235,7 @@ async def _send_idle_setpoint(
             blocking=True,
             context=make_roommind_context(),
         )
-        _last_commands[entity_id] = _cache_entry("set_temperature", {"temperature": setpoint})
+        _remember_command(entity_id, "set_temperature", {"temperature": setpoint})
     except Exception:  # noqa: BLE001
         _LOGGER.warning(
             "Area '%s': climate.set_temperature(%.1f) failed on '%s'",
@@ -275,7 +291,7 @@ async def async_turn_off_climate(
         # Cache fallback for IR devices (only when device has no reliable state)
         if _should_use_cache(state):
             cached = _last_commands.get(entity_id)
-            if cached and cached.get("service") == "set_hvac_mode" and cached.get("hvac_mode") == "off":
+            if cached and cached.get("hvac_mode") == "off":
                 return
         # Defense-in-depth: move setpoint to the no-demand end of the range
         # (min_temp for heating, max_temp for cooling) BEFORE sending "off".
@@ -294,7 +310,7 @@ async def async_turn_off_climate(
                 blocking=True,
                 context=make_roommind_context(),
             )
-            _last_commands[entity_id] = _cache_entry("set_hvac_mode", {"hvac_mode": "off"})
+            _remember_command(entity_id, "set_hvac_mode", {"hvac_mode": "off"})
         except Exception:  # noqa: BLE001
             _LOGGER.warning(
                 "Area '%s': climate.set_hvac_mode(off) failed on '%s'",
@@ -304,9 +320,12 @@ async def async_turn_off_climate(
             )
         return
 
-    # Fallback: device does not support "off" → set to min_temp / max_temp
+    # Fallback: device does not support "off" → neutralize demand via setpoint
     assert state is not None  # guaranteed: hvac_modes non-empty implies state exists
-    is_cooling = "cool" in hvac_modes or "heat_cool" in hvac_modes
+    is_range = state.attributes.get("target_temp_low") is not None
+    # Direction follows the device's active mode (a heat_cool/heat device
+    # sent max_temp would receive a standing HEAT call, not "off").
+    is_cooling = _is_cooling_idle_context(state)
     fallback_temp = state.attributes.get("max_temp") if is_cooling else state.attributes.get("min_temp")
 
     if fallback_temp is None:
@@ -331,26 +350,43 @@ async def async_turn_off_climate(
         return
 
     # Redundancy: skip if already at fallback temp
-    is_range = state.attributes.get("target_temp_low") is not None
     if is_range:
-        cur_check = (
-            state.attributes.get("target_temp_low") if not is_cooling else state.attributes.get("target_temp_high")
-        )
-        if cur_check is not None and round(cur_check, 1) == round(fallback_temp, 1):
+        # Range devices (e.g. heat_cool): widest band = no heating and no
+        # cooling demand.  A single collapsed setpoint would command maximum
+        # demand in one direction (low=high=max_temp is a standing heat call).
+        dev_min = state.attributes.get("min_temp")
+        dev_max = state.attributes.get("max_temp")
+        if dev_min is None or dev_max is None:
+            _LOGGER.warning(
+                "Area '%s': device '%s' has no 'off' mode and no min/max_temp (%s/%s), cannot turn off reliably",
+                area_id,
+                entity_id,
+                dev_min,
+                dev_max,
+            )
             return
-        if cur_check is None and _should_use_cache(state):
+        cur_low = state.attributes.get("target_temp_low")
+        cur_high = state.attributes.get("target_temp_high")
+        if (
+            cur_low is not None
+            and cur_high is not None
+            and round(cur_low, 1) == round(float(dev_min), 1)
+            and round(cur_high, 1) == round(float(dev_max), 1)
+        ):
+            return
+        if _should_use_cache(state):
             cached = _last_commands.get(entity_id)
-            if cached and cached.get("service") == "set_temperature":
+            if cached:
                 c_low = cached.get("target_temp_low")
                 c_high = cached.get("target_temp_high")
                 if (
                     c_low is not None
                     and c_high is not None
-                    and round(c_low, 1) == round(fallback_temp, 1)
-                    and round(c_high, 1) == round(fallback_temp, 1)
+                    and round(c_low, 1) == round(float(dev_min), 1)
+                    and round(c_high, 1) == round(float(dev_max), 1)
                 ):
                     return
-        svc_data: dict = {"entity_id": entity_id, "target_temp_low": fallback_temp, "target_temp_high": fallback_temp}
+        svc_data: dict = {"entity_id": entity_id, "target_temp_low": dev_min, "target_temp_high": dev_max}
     else:
         current_temp_setting = state.attributes.get("temperature")
         if current_temp_setting is not None and round(current_temp_setting, 1) == round(fallback_temp, 1):
@@ -359,7 +395,6 @@ async def async_turn_off_climate(
             cached = _last_commands.get(entity_id)
             if (
                 cached
-                and cached.get("service") == "set_temperature"
                 and cached.get("temperature") is not None
                 and round(cached["temperature"], 1) == round(fallback_temp, 1)
             ):
@@ -380,7 +415,7 @@ async def async_turn_off_climate(
             blocking=True,
             context=make_roommind_context(),
         )
-        _last_commands[entity_id] = _cache_entry("set_temperature", svc_data)
+        _remember_command(entity_id, "set_temperature", svc_data)
     except Exception:  # noqa: BLE001
         _LOGGER.warning(
             "Area '%s': climate.set_temperature(%s) fallback failed on '%s'",
@@ -491,7 +526,7 @@ async def async_idle_device(
         # Cache check (only for devices without reliable state feedback)
         if _should_use_cache(state):
             cached = _last_commands.get(entity_id)
-            if cached and cached.get("service") == "set_temperature" and cached.get("temperature") == ha_t:
+            if cached and cached.get("temperature") == ha_t:
                 return
 
         _LOGGER.debug(
@@ -509,7 +544,7 @@ async def async_idle_device(
                 blocking=True,
                 context=make_roommind_context(),
             )
-            _last_commands[entity_id] = _cache_entry("set_temperature", {"temperature": ha_t})
+            _remember_command(entity_id, "set_temperature", {"temperature": ha_t})
         except Exception:  # noqa: BLE001
             _LOGGER.warning(
                 "Area '%s': climate.set_temperature(%.1f) failed on '%s'",
@@ -546,7 +581,7 @@ async def async_idle_device(
     # Cache fallback for IR devices (only when device has no reliable state)
     if _should_use_cache(state):
         cached = _last_commands.get(entity_id)
-        if cached and cached.get("service") == "set_hvac_mode" and cached.get("hvac_mode") == "fan_only":
+        if cached and cached.get("hvac_mode") == "fan_only":
             if not idle_fan_mode:
                 return
 
@@ -558,7 +593,7 @@ async def async_idle_device(
             blocking=True,
             context=make_roommind_context(),
         )
-        _last_commands[entity_id] = _cache_entry("set_hvac_mode", {"hvac_mode": "fan_only"})
+        _remember_command(entity_id, "set_hvac_mode", {"hvac_mode": "fan_only"})
     except Exception:  # noqa: BLE001
         _LOGGER.warning(
             "Area '%s': climate.set_hvac_mode(fan_only) failed on '%s'",
@@ -595,6 +630,22 @@ async def async_idle_device(
                 idle_fan_mode,
                 fan_modes,
             )
+
+
+def _placeholder_targets(heat: float | None, cool: float | None, current_temp: float) -> tuple[float, float]:
+    """Fill None targets with neutral placeholders for the MPC optimizer.
+
+    A None target means "no demand in this direction".  The placeholder must
+    neither create demand nor mask the other direction: with heat=None on a
+    hot room, a raw current_temp placeholder would lift the cool ceiling via
+    the optimizer's cool>=heat clamp (band collapses to [T_room, T_room] and
+    the room never cools on cool-only overrides / climate_mode=cool_only).
+    """
+    if heat is None and cool is None:
+        return current_temp, current_temp
+    h = heat if heat is not None else min(current_temp, cool)  # type: ignore[arg-type]
+    c = cool if cool is not None else max(current_temp, heat)  # type: ignore[arg-type]
+    return h, c
 
 
 def resolve_hvac_mode(desired: str, hvac_modes: list[str]) -> str | None:
@@ -952,8 +1003,8 @@ class MPCController:
         occupancy_series = [self.q_occupancy] * horizon_blocks
 
         # Build dual target series with schedule lookahead for pre-heating/pre-cooling.
-        # None values (from "off" action) are replaced with current_temp so the
-        # optimizer sees "no deviation needed = idle optimal".
+        # None values (from "off" action) are replaced with placeholders so the
+        # optimizer sees "no deviation needed = idle optimal" for that side.
         if self._target_resolver is not None:
             now = time.time()
             dt_seconds = PLAN_DT_MINUTES * 60
@@ -961,16 +1012,16 @@ class MPCController:
             # Extract separate heat and cool series from TargetTemps
             if raw_targets and isinstance(raw_targets[0], TargetTemps):
                 tt_targets = cast(list[TargetTemps], raw_targets)
-                heat_target_series = [t.heat if t.heat is not None else current_temp for t in tt_targets]
-                cool_target_series = [t.cool if t.cool is not None else current_temp for t in tt_targets]
+                filled = [_placeholder_targets(t.heat, t.cool, current_temp) for t in tt_targets]
+                heat_target_series = [f[0] for f in filled]
+                cool_target_series = [f[1] for f in filled]
             else:
                 # Legacy resolver returning float|None
                 float_targets = cast(list[float | None], raw_targets)
                 heat_target_series = [t if t is not None else current_temp for t in float_targets]
                 cool_target_series = list(heat_target_series)
         else:
-            fallback_h = targets.heat if targets.heat is not None else current_temp
-            fallback_c = targets.cool if targets.cool is not None else current_temp
+            fallback_h, fallback_c = _placeholder_targets(targets.heat, targets.cool, current_temp)
             heat_target_series = [fallback_h] * horizon_blocks
             cool_target_series = [fallback_c] * horizon_blocks
 
@@ -1006,6 +1057,18 @@ class MPCController:
 
         action = plan.get_current_action()
         power_fraction = plan.get_current_power_fraction()
+
+        # Min-run continuity: each replan starts the optimizer from IDLE, so
+        # block 0 is never bound by min_run_blocks.  Keep a freshly started
+        # slow system (e.g. underfloor) running through its minimum window;
+        # the hard-ceiling guard below can still force idle on real overshoot.
+        if (
+            action == MODE_IDLE
+            and self.previous_mode in (MODE_HEATING, MODE_COOLING)
+            and self._within_min_run(self.previous_mode)
+        ):
+            action = self.previous_mode
+            power_fraction = MIN_POWER_FRACTION
 
         # Safety guard: don't heat above the maximum upcoming target,
         # don't cool below the minimum upcoming target, while preserving
@@ -1882,7 +1945,7 @@ class MPCController:
         # live device state, while this branch handles IR/no-state devices via the cache.
         if not skip and eid and _should_use_cache(state):
             cached = _last_commands.get(eid)
-            if cached is not None and cached.get("service") == service:
+            if cached is not None:
                 if service == "set_hvac_mode":
                     if cached.get("hvac_mode") == data.get("hvac_mode"):
                         skip = True
@@ -1919,7 +1982,7 @@ class MPCController:
                 context=make_roommind_context(),
             )
             if eid:
-                _last_commands[eid] = _cache_entry(service, data)
+                _remember_command(eid, service, data)
         except Exception:  # noqa: BLE001
             _LOGGER.warning(
                 "Area '%s': climate.%s failed on '%s'",

@@ -27,7 +27,11 @@ def find_active_block(schedule_blocks: dict, ts: float) -> dict[str, Any] | None
     Returns the block's ``data`` dict, or None if no block matches.
     Caller must check ``schedule_blocks is None`` before calling.
     """
-    dt = datetime.fromtimestamp(ts)
+    from homeassistant.util import dt as dt_util
+
+    # HA schedule entities evaluate blocks in HA's configured timezone, which
+    # can differ from the OS/process-local one (e.g. containers pinned to UTC)
+    dt = datetime.fromtimestamp(ts, tz=dt_util.DEFAULT_TIME_ZONE)
     day_name = dt.strftime("%A").lower()
     current_time = dt.time()
     day_blocks = schedule_blocks.get(day_name, [])

@@ -54,9 +54,11 @@ def _solar_position(latitude: float, longitude: float, timestamp: float) -> tupl
         + 0.00148 * math.sin(3.0 * gamma)
     )
 
-    # True solar time and hour angle
+    # True solar time and hour angle.  Wrap to [0, 1440) — otherwise the
+    # morning/afternoon sign test below flips and the azimuth mirrors E/W
+    # whenever hour_utc*60 + eqtime + 4*longitude leaves that range.
     time_offset = eqtime + 4.0 * longitude  # minutes (UTC, no timezone offset)
-    tst = hour_utc * 60.0 + time_offset
+    tst = (hour_utc * 60.0 + time_offset) % 1440.0
     ha = math.radians((tst / 4.0) - 180.0)
 
     # Solar elevation

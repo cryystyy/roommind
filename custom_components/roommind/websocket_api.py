@@ -489,14 +489,21 @@ async def websocket_override_set(
     else:  # custom
         heat = msg.get("heat")
         cool = msg.get("cool")
-        if heat is None and cool is None:
-            connection.send_error(msg["id"], "invalid", "Custom override requires heat and/or cool")
-            return
 
     if climate_mode == "heat_only":
         cool = None
     elif climate_mode == "cool_only":
         heat = None
+
+    # Validate AFTER climate_mode nulling: a custom override supplying only
+    # the wrong-side target must error, not silently clear the override.
+    if override_type == "custom" and heat is None and cool is None:
+        connection.send_error(
+            msg["id"],
+            "invalid",
+            "Custom override requires heat and/or cool matching the room's climate mode",
+        )
+        return
 
     if heat is not None and cool is not None and cool < heat:
         connection.send_error(msg["id"], "invalid", "Cooling target must be >= heating target")

@@ -209,6 +209,21 @@ class TestCoolingApply:
         assert 16.0 <= trv_temps[0] <= 24.0
 
     @pytest.mark.asyncio
+    async def test_ir_cache_suppresses_alternating_commands(self):
+        """Merged cache: the hvac_mode/temperature pair sent each cycle must
+        not evict each other, or IR/stateless devices get re-blasted every 30s."""
+        hass = build_hass()
+        state = _state("unavailable", {})
+        hass.states.get = MagicMock(return_value=state)
+        room = make_room(thermostats=[], acs=["climate.ir_ac"])
+        ctrl = _make_controller(hass, room)
+        await ctrl.async_apply(MODE_COOLING, TargetTemps(heat=None, cool=24.0), 1.0, current_temp=27.0)
+        first = hass.services.async_call.call_count
+        assert first >= 2  # set_hvac_mode + set_temperature
+        await ctrl.async_apply(MODE_COOLING, TargetTemps(heat=None, cool=24.0), 1.0, current_temp=27.0)
+        assert hass.services.async_call.call_count == first  # fully suppressed
+
+    @pytest.mark.asyncio
     async def test_apply_cooling_turns_off_heat_only_trv(self):
         """Regression: heat-only TRVs are still idled in cooling mode."""
         hass = build_hass()

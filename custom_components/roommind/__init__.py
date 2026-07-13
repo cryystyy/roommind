@@ -118,9 +118,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
         hass.data[DOMAIN].pop("coordinator", None)
 
-    # Remove panel if no entries remain
-    if not hass.data[DOMAIN]:
-        async_remove_panel(hass, "roommind")
+        # Remove the panel when the last entry unloads.  hass.data[DOMAIN]
+        # keeps global keys (store, panel_registered), so it is never empty —
+        # check the remaining loaded entries instead.
+        if not hass.config_entries.async_loaded_entries(DOMAIN) and hass.data[DOMAIN].pop("panel_registered", None):
+            async_remove_panel(hass, "roommind")
 
     return unload_ok
 

@@ -40,7 +40,7 @@ export class RsSettings extends LitElement {
   @state() private _outdoorHumiditySensor = "";
   @state() private _outdoorCoolingMin = 16;
   @state() private _outdoorHeatingMax = 22;
-  @state() private _controlMode: "mpc" | "bangbang" = "mpc";
+  @state() private _controlMode: "mpc" | "bangbang" = "bangbang";
   @state() private _comfortWeight = 70;
   @state() private _weatherEntity = "";
   @state() private _outdoorUnavailableNotify = true;
@@ -93,7 +93,9 @@ export class RsSettings extends LitElement {
       this._outdoorHumiditySensor = s.outdoor_humidity_sensor ?? "";
       this._outdoorCoolingMin = s.outdoor_cooling_min ?? 16;
       this._outdoorHeatingMax = s.outdoor_heating_max ?? 22;
-      this._controlMode = s.control_mode ?? "mpc";
+      // Must match the backend default (websocket_api settings/get) or an
+      // unrelated settings save silently persists a mode the user never chose
+      this._controlMode = s.control_mode ?? "bangbang";
       this._comfortWeight = s.comfort_weight ?? 70;
       this._weatherEntity = s.weather_entity ?? "";
       this._outdoorUnavailableNotify = s.outdoor_unavailable_notify ?? true;

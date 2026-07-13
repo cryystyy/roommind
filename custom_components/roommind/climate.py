@@ -14,6 +14,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -158,6 +159,10 @@ class RoomMindOverrideClimate(CoordinatorEntity, ClimateEntity):
         single = kwargs.get(ATTR_TEMPERATURE)
         if low is not None or high is not None:
             heat, cool = low, high
+            if heat is not None and cool is not None and cool < heat:
+                # Mirror the WebSocket override API: an inverted band makes
+                # the controller oscillate between heating and cooling.
+                raise ServiceValidationError("Cooling target must be >= heating target")
         elif single is not None:
             room = self._room() or {}
             if mode == "cool_only":

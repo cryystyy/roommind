@@ -168,20 +168,32 @@ class MoldManager:
             # Risk cleared -- use hysteresis for deactivation
             if surface_rh is not None and surface_rh < (MOLD_SURFACE_RH_WARNING - MOLD_HYSTERESIS):
                 self._risk_since.pop(area_id, None)
-                if self._prevention_active.get(area_id):
-                    self._prevention_active[area_id] = False
-                    dismiss_mold_notification(
-                        self.hass,
-                        area_id,
-                        "risk",
-                    )
-                    dismiss_mold_notification(
-                        self.hass,
-                        area_id,
-                        "prevention",
-                    )
+                self._prevention_active[area_id] = False
+                # Dismiss unconditionally: detection-only setups (prevention
+                # never active) must also get their risk notification cleared.
+                dismiss_mold_notification(
+                    self.hass,
+                    area_id,
+                    "risk",
+                )
+                dismiss_mold_notification(
+                    self.hass,
+                    area_id,
+                    "prevention",
+                )
                 self._throttler.clear(f"detect_{area_id}")
                 self._throttler.clear(f"prevent_{area_id}")
+
+        # Hysteresis hold: once prevention is active it stays active (delta
+        # applied) until surface RH drops below the release threshold above —
+        # otherwise the heating boost flaps on/off around the warning level.
+        if (
+            settings.get("mold_prevention_enabled")
+            and self._prevention_active.get(area_id)
+            and not result.prevention_active
+        ):
+            result.prevention_delta = mold_prevention_delta(settings.get("mold_prevention_intensity", "medium"))
+            result.prevention_active = True
 
         return result
 

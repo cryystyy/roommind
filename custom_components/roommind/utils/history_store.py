@@ -234,6 +234,10 @@ class HistoryStore:
     def _append_history(self, area_id: str, rows: list[dict]) -> None:
         self._ensure_dir()
         path = self._history_path(area_id)
+        # Pre-schema-change history files must be migrated before appending
+        # new-order rows, or the columns misalign (detail files get this in
+        # record(); history files need it here).
+        self._migrate_header(path)
         file_exists = os.path.isfile(path)
         with open(path, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=DETAIL_FIELDS)

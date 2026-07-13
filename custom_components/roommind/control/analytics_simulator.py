@@ -18,7 +18,7 @@ from ..const import (
 from ..utils.device_utils import get_ac_eids, get_trv_eids
 from .mpc_controller import get_can_heat_cool
 from .mpc_optimizer import MPCOptimizer
-from .residual_heat import build_residual_series, get_min_run_blocks
+from .residual_heat import build_residual_series, decay_residual_heat, get_min_run_blocks
 from .thermal_model import RCModel, ThermalEKF
 
 
@@ -108,7 +108,11 @@ def compute_observed_idle_rate(
             break
         mode_str = p.get("mode") or ""
         rt = p.get("room_temp")
-        if rt is not None and mode_str in ("", "idle"):
+        if mode_str not in ("", "idle"):
+            # Only the trailing contiguous idle run counts — bridging an
+            # active period would attribute HVAC change to idle drift.
+            break
+        if rt is not None:
             idle_pts.append((p["ts"], rt))
     if len(idle_pts) < 2:
         return None
@@ -300,14 +304,23 @@ def _simulate_mpc(
             # Build residual series for remaining blocks
             remaining_residual = None
             if heating_system_type and current_q_residual > 0:
-                remaining_residual = build_residual_series(
-                    sim_residual_elapsed,
-                    heating_system_type,
-                    len(remaining_outdoor),
-                    5.0,
-                    last_power_fraction,
-                    sim_heating_blocks * 5.0 if sim_was_heating else heating_duration_minutes,
-                )
+                if sim_was_heating:
+                    remaining_residual = build_residual_series(
+                        sim_residual_elapsed,
+                        heating_system_type,
+                        len(remaining_outdoor),
+                        5.0,
+                        last_power_fraction,
+                        sim_heating_blocks * 5.0,
+                    )
+                else:
+                    # Seeded (pre-simulation) residual: the real time since
+                    # heating stopped is unknown, so decay the current value
+                    # forward instead of restarting elapsed at 0.
+                    remaining_residual = [
+                        decay_residual_heat(current_q_residual, k * 5.0, heating_system_type)
+                        for k in range(len(remaining_outdoor))
+                    ]
             remaining_occupancy = [q_occupancy] * len(remaining_outdoor)
             plan = optimizer.optimize(
                 T_room=T,
@@ -346,9 +359,6 @@ def _simulate_mpc(
             sim_residual_elapsed = 0.0
             current_q_residual = 0.0
         else:
-            if sim_was_heating and sim_residual_elapsed == 0.0:
-                # Just transitioned from heating to non-heating
-                pass
             sim_residual_elapsed += 5.0
             if heating_system_type and sim_was_heating:
                 from .residual_heat import compute_residual_heat
@@ -359,6 +369,10 @@ def _simulate_mpc(
                     last_power_fraction,
                     sim_heating_blocks * 5.0,
                 )
+            elif heating_system_type:
+                # Seeded residual must decay with simulated time too — an
+                # undecayed seed would apply to the whole horizon.
+                current_q_residual = decay_residual_heat(q_residual, sim_residual_elapsed, heating_system_type)
 
         if action == prev_action:
             blocks_in_action += 1
@@ -479,6 +493,10 @@ def _simulate_bangbang(
                     last_power_fraction,
                     sim_heating_blocks * 5.0,
                 )
+            elif heating_system_type:
+                # Seeded residual must decay with simulated time too — an
+                # undecayed seed would apply to the whole horizon.
+                current_q_residual = decay_residual_heat(q_residual, sim_residual_elapsed, heating_system_type)
 
         pred_temps.append(round(T, 2))
 

@@ -1723,7 +1723,11 @@ async def test_managed_auto_heat_cool_single_setpoint():
 
 @pytest.mark.asyncio
 async def test_turn_off_dual_setpoint_heat_only():
-    """Heat-only device with dual-setpoint and no 'off' mode uses both low/high = min_temp."""
+    """Range device with no 'off' mode gets the widest band (no demand).
+
+    A collapsed setpoint (low=high) commands maximum demand in one direction
+    on heat_cool devices; low=min_temp / high=max_temp is neutral for all.
+    """
     hass = build_hass()
     state = MagicMock()
     state.state = "heat"
@@ -1741,7 +1745,7 @@ async def test_turn_off_dual_setpoint_heat_only():
     assert hass.services.async_call.called
     call_data = hass.services.async_call.call_args[0][2]
     assert call_data["target_temp_low"] == 5.0
-    assert call_data["target_temp_high"] == 5.0
+    assert call_data["target_temp_high"] == 30.0
 
 
 @pytest.mark.asyncio
@@ -2140,7 +2144,8 @@ async def test_turn_off_cool_only_cache_fallback_range_device():
     await async_turn_off_climate(hass, "climate.ac", area_id="living")
     assert hass.services.async_call.call_count == 1
     call_data = hass.services.async_call.call_args[0][2]
-    assert call_data["target_temp_low"] == 30.0
+    # Widest band = no demand in either direction
+    assert call_data["target_temp_low"] == 16.0
     assert call_data["target_temp_high"] == 30.0
 
     # Cached → skipped

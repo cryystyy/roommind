@@ -60,6 +60,22 @@ def compute_residual_heat(
     return q if q >= RESIDUAL_HEAT_CUTOFF else 0.0
 
 
+def decay_residual_heat(q_now: float, elapsed_minutes: float, system_type: str) -> float:
+    """Decay an already-known residual fraction by *elapsed_minutes* more.
+
+    Used when the absolute time since heating stopped is unknown but the
+    current residual value is (e.g. seeding an analytics simulation from
+    live tracker state).
+    """
+    if q_now <= 0:
+        return 0.0
+    profile = HEATING_SYSTEM_PROFILES.get(system_type)
+    if not profile or profile["tau_minutes"] <= 0:
+        return 0.0
+    q = q_now * math.exp(-max(0.0, elapsed_minutes) / profile["tau_minutes"])
+    return q if q >= RESIDUAL_HEAT_CUTOFF else 0.0
+
+
 def build_residual_series(
     elapsed_minutes: float,
     system_type: str,
