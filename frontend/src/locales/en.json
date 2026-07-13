@@ -176,6 +176,7 @@
   "devices.system_type_none": "Standard (no residual heat)",
   "devices.system_type_radiator": "Radiator",
   "devices.system_type_underfloor": "Underfloor Heating",
+  "devices.system_type_tabs": "TABS (Concrete Core)",
   "devices.underfloor_delay_hint": "Underfloor heating has long restart times. A window-open delay of at least 5 minutes is recommended to avoid unnecessary shutoffs.",
   "devices.heating_system_type_boost_hint": "Tip: If the heating system has changed, you can accelerate re-learning under Settings.",
   "devices.idle_action": "When idle",

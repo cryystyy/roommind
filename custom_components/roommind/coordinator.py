@@ -608,6 +608,15 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # --- Compute residual heat from previous cycle state ---
         system_type = room.get("heating_system_type", "")
+        if not system_type:
+            # Fall back to the room's device system types (highest thermal mass
+            # wins) when the room-level field is unset, so TABS/underfloor
+            # dynamics apply even when only the device was tagged.
+            _hst_prio = {"tabs": 3, "underfloor": 2, "radiator": 1}
+            for _dev in room.get("devices", []):
+                _dt = _dev.get("heating_system_type") or ""
+                if _hst_prio.get(_dt, 0) > _hst_prio.get(system_type, 0):
+                    system_type = _dt
         q_residual = self._residual_tracker.get_q_residual(
             area_id,
             system_type,

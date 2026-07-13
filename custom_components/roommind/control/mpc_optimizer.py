@@ -104,7 +104,7 @@ class MPCOptimizer:
         # horizon without a matching cooling-side synthesis would shift the
         # energy/comfort ratio for COOLING and cause more aggressive AC use.
         profile = HEATING_SYSTEM_PROFILES.get(self.heating_system_type) if self.heating_system_type else None
-        if profile and dt_minutes > 0 and not self.can_cool:
+        if profile and dt_minutes > 0 and (not self.can_cool or self.heating_system_type == "tabs"):
             tau_blocks = math.ceil(profile["tau_minutes"] / dt_minutes)
             self._lookahead_blocks = max(
                 LOOKAHEAD_BASE_BLOCKS,

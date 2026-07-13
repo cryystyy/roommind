@@ -176,6 +176,7 @@
   "devices.system_type_none": "Standard (pas de chaleur résiduelle)",
   "devices.system_type_radiator": "Radiateur",
   "devices.system_type_underfloor": "Chauffage au sol",
+  "devices.system_type_tabs": "TABS (dalle active)",
   "devices.underfloor_delay_hint": "Le chauffage au sol a des temps de redémarrage longs. Un délai d'ouverture de fenêtre d'au moins 5 minutes est recommandé pour éviter des arrêts inutiles.",
   "devices.heating_system_type_boost_hint": "Astuce : Si le système de chauffage a changé, vous pouvez accélérer le réapprentissage dans les Paramètres.",
   "devices.idle_action": "Lorsque inactif",

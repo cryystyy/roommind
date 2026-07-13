@@ -30,6 +30,10 @@ from ..const import (
     MODE_IDLE,
     PROPORTIONAL_DEADBAND_C,
     PROPORTIONAL_DEADBAND_NEAR_TARGET_C,
+    TABS_COOL_BOOST_DELTA,
+    TABS_COOL_BOOST_FLOOR,
+    TABS_HEAT_BOOST_CAP,
+    TABS_HEAT_BOOST_DELTA,
     TargetTemps,
     is_override_active,
     make_roommind_context,
@@ -1388,6 +1392,19 @@ class MPCController:
         trv_heat_boost = heating_boost_target if heating_boost_target is not None else HEATING_BOOST_TARGET
         ac_heat_boost = ac_heating_boost_target if ac_heating_boost_target is not None else AC_HEATING_BOOST_TARGET
         ac_cool_boost = cooling_boost_target if cooling_boost_target is not None else AC_COOLING_BOOST_TARGET
+
+        # TABS (thermally active building system / concrete-core): the slab is
+        # the actuator and responds over hours. Never slam the zone to the
+        # device min/max — that guarantees overshoot on a high-mass slab.
+        # Drive a gentle setpoint that is a bounded offset from the room target
+        # so the slow slab tracks toward it without overshooting.
+        if self._heating_system_type == "tabs":
+            if targets.cool is not None:
+                ac_cool_boost = max(targets.cool - TABS_COOL_BOOST_DELTA, TABS_COOL_BOOST_FLOOR)
+            if targets.heat is not None:
+                _tabs_heat = min(targets.heat + TABS_HEAT_BOOST_DELTA, TABS_HEAT_BOOST_CAP)
+                ac_heat_boost = _tabs_heat
+                trv_heat_boost = _tabs_heat
 
         can_heat, can_cool = self._get_can_heat_cool()
 

@@ -5,7 +5,7 @@
 
 import type { DeviceConfig } from "../types";
 
-const HST_PRIORITY: Record<string, number> = { underfloor: 2, radiator: 1, "": 0 };
+const HST_PRIORITY: Record<string, number> = { tabs: 3, underfloor: 2, radiator: 1, "": 0 };
 
 /**
  * Resolve room-level heating_system_type from devices.

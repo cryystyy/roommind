@@ -355,7 +355,9 @@ export class RsDeviceSection extends LitElement {
                     ? localize("devices.system_type_radiator", this.hass.language)
                     : this._heatingSystemType === "underfloor"
                       ? localize("devices.system_type_underfloor", this.hass.language)
-                      : this._heatingSystemType}</span
+                      : this._heatingSystemType === "tabs"
+                        ? localize("devices.system_type_tabs", this.hass.language)
+                        : this._heatingSystemType}</span
                 >
               </div>
             </div>
@@ -521,6 +523,10 @@ export class RsDeviceSection extends LitElement {
                     value: "underfloor",
                     label: localize("devices.system_type_underfloor", this.hass.language),
                   },
+                  {
+                    value: "tabs",
+                    label: localize("devices.system_type_tabs", this.hass.language),
+                  },
                 ]}
                 @selected=${this._onHeatingSystemTypeChange}
                 @closed=${(e: Event) => e.stopPropagation()}
@@ -535,6 +541,9 @@ export class RsDeviceSection extends LitElement {
                 >
                 <ha-list-item value="underfloor"
                   >${localize("devices.system_type_underfloor", this.hass.language)}</ha-list-item
+                >
+                <ha-list-item value="tabs"
+                  >${localize("devices.system_type_tabs", this.hass.language)}</ha-list-item
                 >
               </ha-select>
               ${this._showBoostHint

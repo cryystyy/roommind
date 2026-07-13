@@ -7,7 +7,7 @@ from homeassistant.const import Platform
 from homeassistant.core import Context
 
 DOMAIN = "roommind"
-VERSION = "1.7.9"
+VERSION = "1.7.10"
 
 # Platforms
 PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR, Platform.CLIMATE]
@@ -68,6 +68,15 @@ DEFAULT_OUTDOOR_HEATING_MAX = 22  # Don't heat if outdoor > this
 HEATING_BOOST_TARGET = 30  # Fallback TRV heating boost (used when entity max_temp unavailable)
 AC_HEATING_BOOST_TARGET = 30  # Fallback AC heating boost (used when entity max_temp unavailable)
 AC_COOLING_BOOST_TARGET = 16  # Fallback AC cooling boost (used when entity min_temp unavailable)
+
+# TABS (thermally active building system / concrete-core) gentle drive bounds.
+# The slab has hours of lag; commanding the zone to the device min/max
+# overshoots badly. Instead drive a bounded setpoint offset from the room
+# target so the slow slab tracks toward it without overshooting.
+TABS_COOL_BOOST_DELTA = 5.0  # °C below the cool target at full power
+TABS_COOL_BOOST_FLOOR = 18.0  # never command a TABS zone below this
+TABS_HEAT_BOOST_DELTA = 5.0  # °C above the heat target at full power
+TABS_HEAT_BOOST_CAP = 30.0  # never command a TABS zone above this
 MIN_POWER_FRACTION = 0.15  # Minimum non-zero power fraction (prevents TRV dead zone)
 DEFAULT_COMFORT_WEIGHT = 70  # Default comfort_weight slider value
 APPROACH_RATE_MIN = 0.2  # Gentlest gap fraction closed per block, at comfort_weight=0 (full efficiency)
@@ -134,6 +143,16 @@ HEATING_SYSTEM_PROFILES: dict[str, dict[str, float]] = {
         "initial_fraction": 0.85,
         "tau_charge_minutes": 60.0,
         "min_run_minutes": 30.0,
+    },
+    "tabs": {
+        # Thermally Active Building System (concrete-core; ceiling or floor
+        # slab). Very high thermal mass: the slab is the actuator and the room
+        # responds over hours, so lookahead + residual modelling run long and
+        # the drive must stay gentle to avoid overshoot.
+        "tau_minutes": 240.0,
+        "initial_fraction": 0.9,
+        "tau_charge_minutes": 180.0,
+        "min_run_minutes": 45.0,
     },
 }
 RESIDUAL_HEAT_CUTOFF = 0.02  # below this q_residual is treated as zero
