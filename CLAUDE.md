@@ -318,3 +318,46 @@ roommind at ROOT; bump BOTH manifest.json version AND const.py VERSION to the
 same new value; gh release create + `gh release upload roommind.zip`; HACS
 update; restart HA. Verify on the live box WITH the owner (use Office or Ula's;
 keep the house cool). Keep this CLAUDE.md in the fork, exclude from any upstream PR.
+
+## ============================================================
+## STATUS UPDATE 2026-07-13 (2) -- v1.8.0 "intelligence release" SHIPPED
+## ============================================================
+
+Shipped in v1.8.0 (9 features, all tested, everything opt-in or safe-by-default):
+- Economic price-aware MPC: settings price_entity (Nordpool/Tibber/ENTSO-E
+  attr formats, utils/price_utils.py), hp_cop_at_minus7/plus7 COP curve,
+  grid_export_entity + pv_export_threshold_w PV soak-up. Optimizer gets a
+  normalized cost_series (mean 1.0); economic path uses a model-relative
+  energy term (ECON_ENERGY_SCALE) because the legacy abs(Q)/1000 term is
+  ~0 for C=1 EKF models. No price entity => byte-identical legacy behavior.
+- Dew-point condensation guard (dewpoint_guard_enabled, default ON, radiant
+  rooms only; dewpoint_margin default 2.0C): boost floor at dew+margin +
+  hard cooling cut when air-dewpoint < margin. Complements the Rehau reset.
+- Feels-like cool targets (feels_like_enabled, default OFF).
+- Decision trace: coordinator._decision_traces ring buffer, WS
+  roommind/decisions/get, decision_reason/_target_source in live state,
+  'why' chip in hero.
+- Shadow mode (room.shadow_mode): decisions traced, devices untouched,
+  training/display from observed state.
+- Cold-start priors (ThermalEKF._SYSTEM_PRIORS by heating_system_type).
+- Model confidence chip + slab state-of-charge sensor
+  (sensor.<area>_slab_charge, ResidualHeatTracker.get_charge_fraction —
+  heating charge only, cooling "cold charge" not yet tracked).
+- New settings panel "Energy optimization" (rs-settings-energy.ts).
+
+Earlier the same day: 21 verified defect fixes from a full-codebase
+multi-agent scan (commit 94a7df9) + the v1.7.x cooling work.
+
+QUEUED (agreed roadmap, not yet built — each is a session-sized L/XL item):
+1. Demand-driven minimum supply-temperature optimizer (OpenTherm/HP output)
+2. Per-room energy attribution + counterfactual savings report
+3. Operative-temperature control for radiant rooms (incl. solar MRT)
+4. Guided onboarding wizard + physical-plausibility config validation
+5. 2R2C slab-state thermal model (learned thermal mass — the big bet;
+   upgrades dew-point guard, SoC and pre-heat timing from heuristic to physics)
+6. Tier 3: capacity arbiter, occupancy profiles, sensorless window detection,
+   NIS model-health monitoring, night purge, what-if simulator, bug-report
+   bundle, adaptive comfort band.
+
+Testing on Windows: use .venv, run pytest with -p no:homeassistant -p no:sugar
+(HA imports Unix-only fcntl via the pytest plugin).
