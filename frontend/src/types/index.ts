@@ -182,6 +182,14 @@ export interface GlobalSettings {
   room_order?: string[];
   group_by_floor?: boolean;
   boost_applied_at?: Record<string, number>;
+  price_entity?: string;
+  grid_export_entity?: string;
+  pv_export_threshold_w?: number;
+  hp_cop_at_minus7?: number;
+  hp_cop_at_plus7?: number;
+  feels_like_enabled?: boolean;
+  dewpoint_guard_enabled?: boolean;
+  dewpoint_margin?: number;
 }
 
 // HA types for panel integration

@@ -850,6 +850,8 @@ class MPCController:
         mode_on_since: float | None = None,
         shading_factor: float = 1.0,
         q_occupancy: float = 0.0,
+        price_points: list[tuple[float, float]] | None = None,
+        pv_export_active: bool = False,
     ) -> None:
         self.hass = hass
         self.room_config = room_config
@@ -877,9 +879,14 @@ class MPCController:
         self.q_occupancy = q_occupancy
         self._idle_targets: TargetTemps | None = None
 
+        self._price_points = price_points
+        self._pv_export_active = pv_export_active
+
         s = settings or {}
         self.outdoor_cooling_min = s.get("outdoor_cooling_min", DEFAULT_OUTDOOR_COOLING_MIN)
         self.outdoor_heating_max = s.get("outdoor_heating_max", DEFAULT_OUTDOOR_HEATING_MAX)
+        self._cop_at_minus7 = s.get("hp_cop_at_minus7", 0.0) or 0.0
+        self._cop_at_plus7 = s.get("hp_cop_at_plus7", 0.0) or 0.0
 
         # Comfort weight from UI slider (0-100, default 70 = comfort-biased).
         # Maps to optimizer w_comfort / w_energy ratio.
@@ -1059,6 +1066,7 @@ class MPCController:
             solar_series=solar_series,
             residual_series=residual_series,
             occupancy_series=occupancy_series,
+            cost_series=self._build_cost_series(outdoor_series),
         )
         self.last_plan = plan
 
@@ -1284,6 +1292,31 @@ class MPCController:
             series.append(series[-1])
 
         return series[:n_blocks]
+
+    def _build_cost_series(self, outdoor_series: list[float]) -> list[float] | None:
+        """Normalized per-block energy-cost multipliers (economic MPC).
+
+        Combines the electricity price forecast, the heat pump COP curve
+        and live PV surplus into the series the optimizer's energy term
+        consumes.  None (flat legacy cost) when nothing is configured.
+        """
+        from ..utils.price_utils import build_cost_series, build_price_series
+
+        price_series = None
+        if self._price_points:
+            price_series = build_price_series(
+                self._price_points,
+                time.time(),
+                len(outdoor_series),
+                PLAN_DT_MINUTES,
+            )
+        return build_cost_series(
+            price_series,
+            outdoor_series,
+            self._cop_at_minus7,
+            self._cop_at_plus7,
+            pv_export_active=self._pv_export_active,
+        )
 
     def _build_solar_series(self, n_blocks: int) -> list[float]:
         """Build solar irradiance series for MPC horizon from forecast cloud data."""

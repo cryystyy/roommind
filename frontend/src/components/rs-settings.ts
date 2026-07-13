@@ -18,6 +18,7 @@ import { VACATION_SENTINEL } from "../utils/constants";
 import "./settings/rs-settings-panel";
 import "./settings/rs-settings-general";
 import "./settings/rs-settings-sensors";
+import "./settings/rs-settings-energy";
 import "./settings/rs-settings-control";
 import "./settings/rs-settings-presence";
 import "./settings/rs-settings-vacation";
@@ -65,6 +66,14 @@ export class RsSettings extends LitElement {
   @state() private _moldPreventionIntensity: "light" | "medium" | "strong" = "medium";
   @state() private _moldPreventionNotify = false;
   @state() private _compressorGroups: CompressorGroup[] = [];
+  @state() private _priceEntity = "";
+  @state() private _gridExportEntity = "";
+  @state() private _pvExportThresholdW = 300;
+  @state() private _hpCopAtMinus7 = 0;
+  @state() private _hpCopAtPlus7 = 0;
+  @state() private _feelsLikeEnabled = false;
+  @state() private _dewpointGuardEnabled = true;
+  @state() private _dewpointMargin = 2.0;
   @state() private _boostAppliedAt: Record<string, number> = {};
   @state() private _loaded = false;
 
@@ -126,6 +135,14 @@ export class RsSettings extends LitElement {
       this._moldPreventionNotify = s.mold_prevention_notify_enabled ?? false;
       this._compressorGroups = s.compressor_groups ?? [];
       this._boostAppliedAt = s.boost_applied_at ?? {};
+      this._priceEntity = s.price_entity ?? "";
+      this._gridExportEntity = s.grid_export_entity ?? "";
+      this._pvExportThresholdW = s.pv_export_threshold_w ?? 300;
+      this._hpCopAtMinus7 = s.hp_cop_at_minus7 ?? 0;
+      this._hpCopAtPlus7 = s.hp_cop_at_plus7 ?? 0;
+      this._feelsLikeEnabled = s.feels_like_enabled ?? false;
+      this._dewpointGuardEnabled = s.dewpoint_guard_enabled ?? true;
+      this._dewpointMargin = s.dewpoint_margin ?? 2.0;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.debug("[RoomMind] loadSettings:", err);
@@ -168,6 +185,25 @@ export class RsSettings extends LitElement {
           .outdoorUnavailableNotify=${this._outdoorUnavailableNotify}
           @setting-changed=${this._onSettingChanged}
         ></rs-settings-sensors>
+      </rs-settings-panel>
+
+      <rs-settings-panel
+        icon="mdi:currency-eur"
+        .heading=${localize("energy.title", l)}
+        .intro=${localize("settings.intro.energy", l)}
+      >
+        <rs-settings-energy
+          .hass=${this.hass}
+          .priceEntity=${this._priceEntity}
+          .gridExportEntity=${this._gridExportEntity}
+          .pvExportThresholdW=${this._pvExportThresholdW}
+          .hpCopAtMinus7=${this._hpCopAtMinus7}
+          .hpCopAtPlus7=${this._hpCopAtPlus7}
+          .feelsLikeEnabled=${this._feelsLikeEnabled}
+          .dewpointGuardEnabled=${this._dewpointGuardEnabled}
+          .dewpointMargin=${this._dewpointMargin}
+          @setting-changed=${this._onSettingChanged}
+        ></rs-settings-energy>
       </rs-settings-panel>
 
       <rs-settings-panel
@@ -370,6 +406,14 @@ export class RsSettings extends LitElement {
         mold_prevention_notify_targets: this._moldPreventionNotify
           ? this._moldNotificationTargets.filter((t) => t.entity_id)
           : [],
+        price_entity: this._priceEntity,
+        grid_export_entity: this._gridExportEntity,
+        pv_export_threshold_w: this._pvExportThresholdW,
+        hp_cop_at_minus7: this._hpCopAtMinus7,
+        hp_cop_at_plus7: this._hpCopAtPlus7,
+        feels_like_enabled: this._feelsLikeEnabled,
+        dewpoint_guard_enabled: this._dewpointGuardEnabled,
+        dewpoint_margin: this._dewpointMargin,
       });
       fireSaveStatus(this, "saved");
     } catch {

@@ -539,5 +539,20 @@
   "decision.src_vacation": "Urlaub",
   "decision.src_presence_away": "Abwesend",
   "decision.src_schedule": "Zeitplan",
-  "decision.src_comfort_eco": "Komfort/Eco"
+  "decision.src_comfort_eco": "Komfort/Eco",
+  "energy.title": "Energieoptimierung",
+  "settings.intro.energy": "Verschiebt Heizen und Kühlen in günstige, effiziente oder PV-Überschuss-Stunden und hält Kühlung kondensationssicher. Alles optional — leere Felder behalten das klassische Verhalten.",
+  "energy.price_entity": "Strompreis-Entität",
+  "energy.price_entity_hint": "Ein Preissensor mit Heute/Morgen-Prognoseattributen (Nordpool, Tibber, ENTSO-E, EPEX…). Der MPC heizt/kühlt in günstigen Stunden vor und überbrückt teure.",
+  "energy.grid_export_entity": "Netzeinspeisungs-Sensor",
+  "energy.grid_export_hint": "Bei Einspeisung über dem Schwellwert gilt Energie als momentan kostenlos — die Speichermasse nimmt den PV-Überschuss auf.",
+  "energy.pv_threshold": "Einspeise-Schwellwert",
+  "energy.cop_hint": "Wärmepumpen-COP bei zwei Außentemperaturen (aus dem Datenblatt). Der Optimierer bevorzugt dann Laufzeiten mit hoher Effizienz. 0 = deaktiviert.",
+  "energy.cop_minus7": "COP bei -7°C",
+  "energy.cop_plus7": "COP bei +7°C",
+  "energy.feels_like": "Gefühlte Kühlziele",
+  "energy.feels_like_hint": "Kühlziel mit Luftfeuchte gewichten: schwüle Räume werden etwas stärker gekühlt, trockene Tage weniger (max ±1,5°C).",
+  "energy.dewpoint_guard": "Taupunkt-Kondensationsschutz",
+  "energy.dewpoint_guard_hint": "Flächenkühlung (TABS/Fußboden) nie unter den Raumtaupunkt fahren. Eingeschaltet lassen, außer die Mischstation regelt bereits taupunktgeführt UND Sie wissen, warum Sie es abschalten.",
+  "energy.dewpoint_margin": "Sicherheitsabstand"
 }

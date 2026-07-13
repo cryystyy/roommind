@@ -90,6 +90,9 @@ FEELS_LIKE_COEFF = 0.35  # °C cool-target bias per 10% RH away from 50% (opt-in
 FEELS_LIKE_MAX_DELTA = 1.5  # clamp for the feels-like bias (°C)
 DEFAULT_DEWPOINT_MARGIN = 2.0  # °C safety margin above dew point for radiant cooling
 
+# Economic MPC (price/COP-aware energy term + PV-surplus soak-up)
+DEFAULT_PV_EXPORT_THRESHOLD_W = 300.0  # grid export above this = surplus to soak up
+
 # Update interval in seconds
 UPDATE_INTERVAL = 30
 

@@ -539,5 +539,20 @@
   "decision.src_vacation": "vacances",
   "decision.src_presence_away": "absent",
   "decision.src_schedule": "planning",
-  "decision.src_comfort_eco": "confort/éco"
+  "decision.src_comfort_eco": "confort/éco",
+  "energy.title": "Optimisation énergétique",
+  "settings.intro.energy": "Décale chauffage et refroidissement vers les heures bon marché, efficaces ou d'excédent solaire, et protège le refroidissement de la condensation. Tout est optionnel — laissez vide pour le comportement classique.",
+  "energy.price_entity": "Entité prix de l'électricité",
+  "energy.price_entity_hint": "Un capteur de prix avec attributs de prévision aujourd'hui/demain (Nordpool, Tibber, ENTSO-E, EPEX…). Le MPC préchauffe/prérefroidit aux heures creuses.",
+  "energy.grid_export_entity": "Capteur d'injection réseau",
+  "energy.grid_export_hint": "Au-dessus du seuil d'injection, l'énergie est considérée gratuite — la dalle absorbe le surplus solaire.",
+  "energy.pv_threshold": "Seuil d'injection",
+  "energy.cop_hint": "COP de la pompe à chaleur à deux températures extérieures (fiche technique). L'optimiseur privilégie les périodes efficaces. 0 = désactivé.",
+  "energy.cop_minus7": "COP à -7°C",
+  "energy.cop_plus7": "COP à +7°C",
+  "energy.feels_like": "Cibles de refroidissement ressenties",
+  "energy.feels_like_hint": "Pondère la cible de refroidissement avec l'humidité : les pièces moites sont refroidies un peu plus, les jours secs un peu moins (max ±1,5°C).",
+  "energy.dewpoint_guard": "Garde anti-condensation (point de rosée)",
+  "energy.dewpoint_guard_hint": "Ne jamais refroidir une surface rayonnante (TABS/plancher) sous le point de rosée. À laisser activé sauf si votre station de mélange gère déjà le point de rosée ET que vous savez pourquoi vous le désactivez.",
+  "energy.dewpoint_margin": "Marge de sécurité"
 }

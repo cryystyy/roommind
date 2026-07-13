@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_ECO_COOL,
     DEFAULT_ECO_HEAT,
     DEFAULT_OUTDOOR_HEATING_MAX,
+    DEFAULT_PV_EXPORT_THRESHOLD_W,
     DOMAIN,
     FEELS_LIKE_COEFF,
     FEELS_LIKE_MAX_DELTA,
@@ -84,6 +85,7 @@ from .utils.device_utils import (
 )
 from .utils.history_store import HistoryStore
 from .utils.mold_utils import dew_point
+from .utils.price_utils import extract_price_points
 from .utils.schedule_utils import resolve_schedule_index
 from .utils.sensor_utils import read_sensor_value
 from .utils.temp_utils import celsius_delta_to_ha, ha_temp_to_celsius, ha_temp_unit_str
@@ -133,6 +135,9 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         # Per-room ring buffer of structured control decisions ("why is this
         # room heating?") — surfaced via roommind/decisions/get and the panel.
         self._decision_traces: dict[str, deque[dict]] = {}
+        # Economic MPC inputs, refreshed once per cycle
+        self._price_points: list[tuple[float, float]] | None = None
+        self._pv_export_active: bool = False
         self._weather_manager = WeatherManager(hass)
         self._current_q_solar: float = 0.0
         # Valve protection (anti-seize)
@@ -246,6 +251,21 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             time.time(),
             cloud_coverage,
         )
+
+        # Economic MPC inputs (once per cycle): price forecast + PV surplus
+        self._price_points = None
+        price_entity = settings.get("price_entity")
+        if price_entity:
+            ps = self.hass.states.get(price_entity)
+            if ps is not None and ps.state not in ("unavailable", "unknown"):
+                points = extract_price_points(ps.attributes)
+                self._price_points = points or None
+        self._pv_export_active = False
+        export_entity = settings.get("grid_export_entity")
+        if export_entity:
+            export_w = read_sensor_value(self.hass, export_entity, "global", "grid export power")
+            threshold = settings.get("pv_export_threshold_w", DEFAULT_PV_EXPORT_THRESHOLD_W)
+            self._pv_export_active = export_w is not None and export_w >= threshold
 
         for area_id, room in rooms.items():
             try:
@@ -709,6 +729,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             heating_system_type=system_type,
             shading_factor=shading_factor,
             q_occupancy=q_occupancy,
+            price_points=self._price_points,
+            pv_export_active=self._pv_export_active,
         )
         mode, power_fraction = await controller.async_evaluate(current_temp, targets)
 

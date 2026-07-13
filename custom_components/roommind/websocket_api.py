@@ -144,6 +144,11 @@ _SETTINGS_SAVE_FIELDS = (
     "feels_like_enabled",
     "dewpoint_guard_enabled",
     "dewpoint_margin",
+    "price_entity",
+    "grid_export_entity",
+    "pv_export_threshold_w",
+    "hp_cop_at_minus7",
+    "hp_cop_at_plus7",
 )
 
 
@@ -653,6 +658,11 @@ async def websocket_get_settings(
         vol.Optional("feels_like_enabled"): bool,
         vol.Optional("dewpoint_guard_enabled"): bool,
         vol.Optional("dewpoint_margin"): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5.0)),
+        vol.Optional("price_entity"): str,
+        vol.Optional("grid_export_entity"): str,
+        vol.Optional("pv_export_threshold_w"): vol.All(vol.Coerce(float), vol.Range(min=0, max=20000)),
+        vol.Optional("hp_cop_at_minus7"): vol.All(vol.Coerce(float), vol.Range(min=0, max=8)),
+        vol.Optional("hp_cop_at_plus7"): vol.All(vol.Coerce(float), vol.Range(min=0, max=8)),
         vol.Optional("compressor_groups"): [
             {
                 vol.Required("id"): str,

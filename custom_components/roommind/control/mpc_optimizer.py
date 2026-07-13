@@ -17,6 +17,12 @@ LOOKAHEAD_BASE_BLOCKS = 6
 # avoiding silent clamping. See issue #131.
 LOOKAHEAD_HORIZON_SCALE = 1.0
 
+# Economic-MPC energy weight per full-power block (at normalized cost 1.0).
+# Calibrated against the comfort term: with default weights (w_comfort=7,
+# w_energy=3) a unit-cost block costs like a ~0.3°C sustained deviation, so
+# cheap blocks pre-charge readily and expensive blocks tolerate small drift.
+ECON_ENERGY_SCALE = 0.2
+
 
 @dataclass
 class MPCPlan:
@@ -81,6 +87,7 @@ class MPCOptimizer:
         solar_series: list[float] | None = None,
         residual_series: list[float] | None = None,
         occupancy_series: list[float] | None = None,
+        cost_series: list[float] | None = None,
     ) -> MPCPlan:
         """Find optimal action sequence over the planning horizon.
 
@@ -156,6 +163,7 @@ class MPCOptimizer:
                 future_solar = q_solar[i:] if q_solar else None
                 future_residual = q_residual[i:] if q_residual else None
                 future_occupancy = q_occupancy[i:] if q_occupancy else None
+                future_cost = cost_series[i:] if cost_series else None
                 for action in available:
                     cost = self._evaluate_action(
                         action,
@@ -170,6 +178,7 @@ class MPCOptimizer:
                         future_solar=future_solar,
                         future_residual=future_residual,
                         future_occupancy=future_occupancy,
+                        future_cost=future_cost,
                     )
                     if cost < best_cost:
                         best_cost = cost
@@ -246,6 +255,7 @@ class MPCOptimizer:
         future_solar: list[float] | None = None,
         future_residual: list[float] | None = None,
         future_occupancy: list[float] | None = None,
+        future_cost: list[float] | None = None,
     ) -> float:
         """Evaluate the cost of taking an action, looking a few steps ahead.
 
@@ -311,9 +321,23 @@ class MPCOptimizer:
             elif T > c_tgt:
                 total_cost += self.w_comfort * (T - c_tgt) ** 2
             # else: inside dead band, no comfort cost
-            # Energy cost: proportional to HVAC power for min_run blocks
+            # Energy cost: proportional to HVAC power for min_run blocks.
             if j < self.min_run_blocks and action != MODE_IDLE:
-                total_cost += self.w_energy * abs(Q) / 1000.0
+                if future_cost is not None:
+                    # Economic MPC: time-varying, model-scale-free energy term.
+                    # future_cost is the normalized price/COP series (mean 1.0);
+                    # cheap / high-COP blocks lower the threshold to run — the
+                    # slab pre-charges there and coasts through expensive
+                    # blocks.  abs(Q)/Q_ref is used instead of the legacy
+                    # abs(Q)/1000 because learned models are C=1 normalized
+                    # (Q ≈ beta ≈ 1-4), which makes the /1000 term vanish.
+                    unit = future_cost[j] if j < len(future_cost) else 1.0
+                    q_ref = max(self.model.Q_heat, self.model.Q_cool, 1e-9)
+                    total_cost += self.w_energy * unit * (abs(Q) / q_ref) * ECON_ENERGY_SCALE
+                else:
+                    # Legacy flat term (kept byte-identical when the economic
+                    # MPC is not configured).
+                    total_cost += self.w_energy * abs(Q) / 1000.0
 
         return total_cost
 

@@ -539,5 +539,20 @@
   "decision.src_vacation": "vacation",
   "decision.src_presence_away": "away",
   "decision.src_schedule": "schedule",
-  "decision.src_comfort_eco": "comfort/eco"
+  "decision.src_comfort_eco": "comfort/eco",
+  "energy.title": "Energy optimization",
+  "settings.intro.energy": "Shift heating and cooling into cheap, efficient or solar-surplus hours, and keep cooling condensation-safe. All optional — leave fields empty to keep classic behavior.",
+  "energy.price_entity": "Electricity price entity",
+  "energy.price_entity_hint": "A price sensor with today/tomorrow forecast attributes (Nordpool, Tibber, ENTSO-E, EPEX…). The MPC pre-heats/pre-cools in cheap hours and coasts through expensive ones.",
+  "energy.grid_export_entity": "Grid export power sensor",
+  "energy.grid_export_hint": "When exporting more than the threshold, energy is treated as free right now — the slab soaks up your solar surplus.",
+  "energy.pv_threshold": "Export threshold",
+  "energy.cop_hint": "Heat pump COP at two outdoor temperatures (from the datasheet). The optimizer then prefers running when the heat pump is most efficient. Leave 0 to disable.",
+  "energy.cop_minus7": "COP at -7°C",
+  "energy.cop_plus7": "COP at +7°C",
+  "energy.feels_like": "Feels-like cooling targets",
+  "energy.feels_like_hint": "Bias the cooling target with humidity: muggy rooms are cooled a bit further, dry days a bit less (max ±1.5°C).",
+  "energy.dewpoint_guard": "Dew-point condensation guard",
+  "energy.dewpoint_guard_hint": "Never drive radiant (TABS/underfloor) cooling below the room dew point. Keep this on unless your mixing station already does dew-point supply reset AND you know why you are disabling it.",
+  "energy.dewpoint_margin": "Safety margin"
 }
