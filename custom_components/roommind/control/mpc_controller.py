@@ -643,9 +643,12 @@ def _placeholder_targets(heat: float | None, cool: float | None, current_temp: f
     """
     if heat is None and cool is None:
         return current_temp, current_temp
-    h = heat if heat is not None else min(current_temp, cool)  # type: ignore[arg-type]
-    c = cool if cool is not None else max(current_temp, heat)  # type: ignore[arg-type]
-    return h, c
+    if heat is None:
+        assert cool is not None
+        return min(current_temp, cool), cool
+    if cool is None:
+        return heat, max(current_temp, heat)
+    return heat, cool
 
 
 def resolve_hvac_mode(desired: str, hvac_modes: list[str]) -> str | None:
