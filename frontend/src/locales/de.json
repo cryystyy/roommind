@@ -554,5 +554,12 @@
   "energy.feels_like_hint": "Kühlziel mit Luftfeuchte gewichten: schwüle Räume werden etwas stärker gekühlt, trockene Tage weniger (max ±1,5°C).",
   "energy.dewpoint_guard": "Taupunkt-Kondensationsschutz",
   "energy.dewpoint_guard_hint": "Flächenkühlung (TABS/Fußboden) nie unter den Raumtaupunkt fahren. Eingeschaltet lassen, außer die Mischstation regelt bereits taupunktgeführt UND Sie wissen, warum Sie es abschalten.",
-  "energy.dewpoint_margin": "Sicherheitsabstand"
+  "energy.dewpoint_margin": "Sicherheitsabstand",
+  "room.shadow_mode_toggle": "Schattenmodus (nur beobachten)",
+  "room.shadow_mode_hint": "RoomMind trifft alle Entscheidungen und protokolliert, was es getan HÄTTE, steuert die Geräte aber nicht. Ideal zum Vertrauensaufbau — vergleichen Sie die Entscheidungshistorie mit dem Verhalten Ihrer aktuellen Steuerung.",
+  "room.shadow_badge": "Schatten",
+  "model.confidence": "Modell",
+  "model.confidence_hint": "Wie gut das selbstlernende Wärmemodell diesen Raum bereits kennt. Intelligente Planung (MPC) greift ab ca. 80-100%.",
+  "model.slab_charge": "Speicher",
+  "model.slab_charge_hint": "Geschätzte in der Boden-/Deckenmasse gespeicherte Wärmeladung. Eine geladene Masse konditioniert den Raum nach Ventilschluss weiter."
 }

@@ -185,7 +185,7 @@ class TestRoomMindCoordinator:
         # async_add_entities should be called with 3 entities
         mock_add_entities.assert_called_once()
         entities = mock_add_entities.call_args[0][0]
-        assert len(entities) == 2
+        assert len(entities) == 3
 
         # Verify entity types
         from custom_components.roommind.sensor import (

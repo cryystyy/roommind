@@ -85,6 +85,7 @@ export class RsRoomDetail extends LitElement {
   @state() private _isOutdoor = false;
   @state() private _valveProtectionExclude: Set<string> = new Set();
   @state() private _climateControlEnabled = true;
+  @state() private _shadowMode = false;
   @state() private _heatSourceOrchestration = false;
   @state() private _heatSourcePrimaryDelta = 1.5;
   @state() private _heatSourceOutdoorThreshold = 5.0;
@@ -288,6 +289,7 @@ export class RsRoomDetail extends LitElement {
       this._isOutdoor = this.config.is_outdoor ?? false;
       this._valveProtectionExclude = new Set(this.config.valve_protection_exclude ?? []);
       this._climateControlEnabled = this.config.climate_control_enabled ?? true;
+      this._shadowMode = this.config.shadow_mode ?? false;
       this._heatSourceOrchestration = this.config.heat_source_orchestration ?? false;
       this._heatSourcePrimaryDelta = this.config.heat_source_primary_delta ?? 1.5;
       this._heatSourceOutdoorThreshold = this.config.heat_source_outdoor_threshold ?? 5.0;
@@ -328,6 +330,7 @@ export class RsRoomDetail extends LitElement {
       this._isOutdoor = false;
       this._valveProtectionExclude = new Set();
       this._climateControlEnabled = true;
+    this._shadowMode = false;
       this._heatSourceOrchestration = false;
       this._heatSourcePrimaryDelta = 1.5;
       this._heatSourceOutdoorThreshold = 5.0;
@@ -401,6 +404,14 @@ export class RsRoomDetail extends LitElement {
                   .hint=${localize("room.climate_control_hint", this.hass.language)}
                   .checked=${this._climateControlEnabled}
                   @toggle-changed=${this._onClimateControlToggle}
+                ></rs-toggle-card>
+
+                <rs-toggle-card
+                  icon="mdi:eye-outline"
+                  .label=${localize("room.shadow_mode_toggle", this.hass.language)}
+                  .hint=${localize("room.shadow_mode_hint", this.hass.language)}
+                  .checked=${this._shadowMode}
+                  @toggle-changed=${this._onShadowModeToggle}
                 ></rs-toggle-card>
 
                 <rs-section-card
@@ -1055,6 +1066,11 @@ export class RsRoomDetail extends LitElement {
     this._autoSave();
   }
 
+  private _onShadowModeToggle(e: CustomEvent) {
+    this._shadowMode = e.detail;
+    this._autoSave();
+  }
+
   private _onOutdoorToggle(e: CustomEvent<boolean>) {
     this._isOutdoor = e.detail;
     this._autoSave();
@@ -1099,6 +1115,7 @@ export class RsRoomDetail extends LitElement {
         display_name: this._displayName,
         covers: [...this._selectedCovers],
         climate_control_enabled: this._climateControlEnabled,
+        shadow_mode: this._shadowMode,
         covers_auto_enabled: this._coversAutoEnabled,
         covers_deploy_threshold: this._coversDeployThreshold,
         covers_min_position: this._coversMinPosition,

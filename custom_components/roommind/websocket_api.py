@@ -104,6 +104,7 @@ _ROOM_SAVE_FIELDS = (
     "heat_source_ac_min_outdoor",
     "valve_protection_exclude",
     "climate_control_enabled",
+    "shadow_mode",
 )
 
 _SETTINGS_SAVE_FIELDS = (
@@ -274,6 +275,7 @@ async def websocket_list_rooms(
             "feels_like_delta": live.get("feels_like_delta", 0),
             "decision_reason": live.get("decision_reason", ""),
             "decision_target_source": live.get("decision_target_source", ""),
+            "slab_charge": live.get("slab_charge"),
         }
         result[area_id] = room_data
 
@@ -378,6 +380,7 @@ async def websocket_list_rooms(
         vol.Optional("heat_source_outdoor_threshold"): vol.All(vol.Coerce(float), vol.Range(min=-20, max=25)),
         vol.Optional("heat_source_ac_min_outdoor"): vol.All(vol.Coerce(float), vol.Range(min=-30, max=5)),
         vol.Optional("climate_control_enabled"): bool,
+        vol.Optional("shadow_mode"): bool,
     }
 )
 @websocket_api.async_response

@@ -44,6 +44,7 @@ NORMAL_ROOM_KEYS = {
     "feels_like_delta",
     "decision_reason",
     "decision_target_source",
+    "slab_charge",
     "mode",
     "direction",
     "commanded_mode",

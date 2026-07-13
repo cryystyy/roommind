@@ -42,7 +42,7 @@ async def test_setup_entry_creates_entities(hass, mock_config_entry, store):
     # 2 entities per room (target_temp + mode)
     add_entities.assert_called_once()
     entities = add_entities.call_args[0][0]
-    assert len(entities) == 2
+    assert len(entities) == 3
 
 
 @pytest.mark.asyncio
@@ -80,14 +80,14 @@ async def test_setup_entry_multiple_rooms(hass, mock_config_entry, store):
     await async_setup_entry(hass, mock_config_entry, add_entities)
 
     entities = add_entities.call_args[0][0]
-    assert len(entities) == 4  # 2 per room
+    assert len(entities) == 6  # 3 per room
 
 
 def test_create_room_entities():
     """_create_room_entities returns target temp and mode sensors."""
     coordinator = _make_coordinator()
     entities = _create_room_entities(coordinator, "room_a")
-    assert len(entities) == 2
+    assert len(entities) == 3
     assert isinstance(entities[0], RoomMindTargetTemperatureSensor)
     assert isinstance(entities[1], RoomMindModeSensor)
 

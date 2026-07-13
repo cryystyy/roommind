@@ -60,6 +60,7 @@ export interface RoomLiveData {
   feels_like_delta?: number;
   decision_reason?: string; // dominant constraint key for "why is it doing X"
   decision_target_source?: string; // override|vacation|presence_away|schedule|comfort_eco
+  slab_charge?: number | null; // thermal-mass state of charge 0-100 (slow systems)
 }
 
 export type DeviceType = "trv" | "ac";
@@ -143,6 +144,7 @@ export interface RoomConfig {
   heat_source_outdoor_threshold?: number;
   heat_source_ac_min_outdoor?: number;
   climate_control_enabled?: boolean;
+  shadow_mode?: boolean; // observe-only: decisions traced, devices untouched
   live?: RoomLiveData;
 }
 

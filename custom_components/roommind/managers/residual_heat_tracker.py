@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import time
 
-from ..const import MODE_HEATING
+from ..const import HEATING_SYSTEM_PROFILES, MODE_HEATING
 from ..control.residual_heat import compute_residual_heat
 
 
@@ -40,6 +41,34 @@ class ResidualHeatTracker:
             self._off_since.pop(area_id, None)
             self._off_power.pop(area_id, None)
             self._on_since.pop(area_id, None)
+
+    def get_charge_fraction(self, area_id: str, system_type: str, current_mode: str) -> float | None:
+        """Normalized thermal-mass state of charge (0-1) for slow systems.
+
+        While heating: how charged the mass is so far this run (saturating
+        with tau_charge).  After heating: the stored fraction decaying with
+        tau.  Heating charge only — the tracker does not yet follow cooling
+        transitions ("cold charge").  None when the system type has no
+        residual-heat profile (e.g. plain radiators with tau=0 still get a
+        value; unknown/"" types return None).
+        """
+        profile = HEATING_SYSTEM_PROFILES.get(system_type)
+        if not profile or profile["tau_minutes"] <= 0:
+            return None
+        tau = profile["tau_minutes"]
+        tau_charge = profile.get("tau_charge_minutes", tau)
+        now = time.time()
+        if current_mode == MODE_HEATING and area_id in self._on_since:
+            minutes = (now - self._on_since[area_id]) / 60.0
+            pf = max(self._off_power.get(area_id, 1.0), 0.0)
+            return min(1.0, (1.0 - math.exp(-minutes / tau_charge)) * pf)
+        if area_id in self._off_since:
+            elapsed = (now - self._off_since[area_id]) / 60.0
+            heat_dur = (self._off_since[area_id] - self._on_since.get(area_id, self._off_since[area_id])) / 60.0
+            pf = max(self._off_power.get(area_id, 1.0), 0.0)
+            charge = (1.0 - math.exp(-heat_dur / tau_charge)) if heat_dur > 0 else 1.0
+            return min(1.0, charge * pf * math.exp(-max(elapsed, 0.0) / tau))
+        return 0.0
 
     def remove_room(self, area_id: str) -> None:
         """Clean up state for a removed room."""

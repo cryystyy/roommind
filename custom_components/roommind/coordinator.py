@@ -812,6 +812,11 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             power_fraction = 0.0
 
         climate_active = settings.get("climate_control_active", True) and room.get("climate_control_enabled", True)
+        # Shadow mode: run the full decision loop but never touch devices.
+        # Decisions land in the trace (what RoomMind WOULD have done); the
+        # display and EKF training follow the observed device state instead.
+        shadow_mode = bool(room.get("shadow_mode", False))
+        actuation_active = climate_active and not shadow_mode
         # Startup guard: Full Control room without any temperature reading yet —
         # leave devices in their current state instead of idling them.
         waiting_for_data = has_external_sensor and self._waiting_for_first_reading(area_id)
@@ -915,7 +920,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         compressor_forced_on: set[str] = set()
         compressor_forced_off: set[str] = set()
 
-        if all_device_eids and climate_active:
+        if all_device_eids and actuation_active:
             for eid in all_device_eids:
                 if self._compressor_manager.get_group_for_entity(eid) is None:
                     continue
@@ -945,7 +950,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # --- Residual heat transition tracking ---
         # After compressor constraints may have changed mode to IDLE.
-        if climate_active and system_type:
+        if actuation_active and system_type:
             self._residual_tracker.update(
                 area_id,
                 mode,
@@ -964,6 +969,16 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(
                 "Room '%s': no temperature reading since startup, skipping device control",
                 area_id,
+            )
+        elif shadow_mode:
+            # Shadow mode: the decision is recorded (trace + would-be mode)
+            # but no device command is sent and compressor-group member state
+            # is left untouched.
+            _LOGGER.debug(
+                "Room '%s': shadow mode — would apply %s (pf=%.2f), not touching devices",
+                area_id,
+                mode,
+                power_fraction,
             )
         else:
             try:
@@ -1034,7 +1049,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         )
 
         # Track valve actuation during normal heating (skip excluded entities)
-        if mode == MODE_HEATING:
+        if mode == MODE_HEATING and actuation_active:
             excluded = set(room.get("valve_protection_exclude", []))
             heating_eids = [eid for eid in get_trv_eids(room.get("devices", [])) if eid not in excluded]
             if heat_source_plan is not None:
@@ -1078,8 +1093,13 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             q_occupancy=q_occupancy,
             has_external_sensor=has_external_sensor,
             heat_source_plan=heat_source_plan,
-            climate_active=climate_active,
+            # Shadow mode trains and displays from OBSERVED device state (the
+            # commanded mode was never sent), exactly like learn-only mode.
+            climate_active=actuation_active,
         )
+
+        # Slab thermal-mass state of charge (0-100%), slow systems only
+        slab_charge = self._residual_tracker.get_charge_fraction(area_id, system_type, mode)
 
         # --- Decision trace: structured "why" for this cycle ---
         decision = self._record_decision(
@@ -1100,6 +1120,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             waiting_for_data=waiting_for_data,
             cooling_limited=cooling_limited,
             feels_like_delta=feels_like_delta,
+            shadow_mode=shadow_mode,
         )
 
         return self._build_room_state_dict(
@@ -1136,6 +1157,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             room_dew_point=room_dew_point,
             cooling_limited=cooling_limited,
             feels_like_delta=feels_like_delta,
+            slab_charge=slab_charge,
         )
 
     def _record_decision(
@@ -1158,6 +1180,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         waiting_for_data: bool,
         cooling_limited: str,
         feels_like_delta: float,
+        shadow_mode: bool = False,
     ) -> dict:
         """Build and store a structured explanation of this cycle's decision.
 
@@ -1217,6 +1240,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "presence_away": presence_away,
             "cooling_limited": cooling_limited,
             "feels_like_delta": feels_like_delta,
+            "shadow": shadow_mode,
         }
         buf = self._decision_traces.setdefault(area_id, deque(maxlen=50))
         # Only append when something meaningful changed (or every ~5 min) so
@@ -1505,6 +1529,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         cooling_limited: str = "",
         feels_like_delta: float = 0.0,
         decision: dict | None = None,
+        slab_charge: float | None = None,
     ) -> dict:
         """Build the final room state dictionary."""
         _room_devices = room.get("devices", [])
@@ -1527,6 +1552,7 @@ class RoomMindCoordinator(DataUpdateCoordinator):
             "feels_like_delta": feels_like_delta,
             "decision_reason": (decision or {}).get("reason", ""),
             "decision_target_source": (decision or {}).get("target_source", ""),
+            "slab_charge": (round(slab_charge * 100) if slab_charge is not None else None),
             "mode": display_mode,
             "direction": _direction,
             "commanded_mode": mode,

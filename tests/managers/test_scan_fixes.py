@@ -99,3 +99,40 @@ def test_history_header_migration_on_append(tmp_path):
     assert rows[1]["timestamp"] == "2000"
     assert rows[1]["room_temp"] == "21.5"
     assert rows[1]["mode"] == "idle"
+
+
+class TestSlabChargeFraction:
+    def test_charges_while_heating_and_decays_after(self):
+        import time
+        from unittest.mock import patch
+
+        from custom_components.roommind.managers.residual_heat_tracker import ResidualHeatTracker
+
+        tr = ResidualHeatTracker()
+        t0 = 1_000_000.0
+        with patch("time.time", return_value=t0):
+            tr.update("r", "heating", 1.0, "idle")
+        with patch("time.time", return_value=t0 + 3600):
+            mid = tr.get_charge_fraction("r", "tabs", "heating")
+        with patch("time.time", return_value=t0 + 4 * 3600):
+            full = tr.get_charge_fraction("r", "tabs", "heating")
+            tr.update("r", "idle", 0.0, "heating")  # heating stops
+        with patch("time.time", return_value=t0 + 5 * 3600):
+            decayed1 = tr.get_charge_fraction("r", "tabs", "idle")
+        with patch("time.time", return_value=t0 + 9 * 3600):
+            decayed2 = tr.get_charge_fraction("r", "tabs", "idle")
+        assert 0.0 < mid < full <= 1.0
+        assert full > decayed1 > decayed2 >= 0.0
+        _ = time  # keep import used
+
+    def test_none_for_unknown_system(self):
+        from custom_components.roommind.managers.residual_heat_tracker import ResidualHeatTracker
+
+        tr = ResidualHeatTracker()
+        assert tr.get_charge_fraction("r", "", "idle") is None
+
+    def test_zero_when_never_heated(self):
+        from custom_components.roommind.managers.residual_heat_tracker import ResidualHeatTracker
+
+        tr = ResidualHeatTracker()
+        assert tr.get_charge_fraction("r", "tabs", "idle") == 0.0

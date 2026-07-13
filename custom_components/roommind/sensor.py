@@ -18,6 +18,7 @@ def _create_room_entities(coordinator: RoomMindCoordinator, area_id: str) -> lis
     return [
         RoomMindTargetTemperatureSensor(coordinator, area_id),
         RoomMindModeSensor(coordinator, area_id),
+        RoomMindSlabChargeSensor(coordinator, area_id),
     ]
 
 
@@ -99,3 +100,19 @@ class RoomMindModeSensor(_RoomMindBaseSensor):
             val = room.get("mode", "idle")
             return str(val) if val is not None else "idle"
         return "idle"
+
+
+class RoomMindSlabChargeSensor(_RoomMindBaseSensor):
+    """Thermal-mass state of charge (0-100%) for slow systems.
+
+    Only meaningful for rooms with an underfloor/TABS heating system type;
+    other rooms report unknown.  Makes the invisible slab battery visible
+    and automatable ("charged, coasting").
+    """
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:battery-heart-variant"
+    _data_key = "slab_charge"
+
+    def __init__(self, coordinator: RoomMindCoordinator, area_id: str) -> None:
+        super().__init__(coordinator, area_id, "slab_charge", "Slab Charge")

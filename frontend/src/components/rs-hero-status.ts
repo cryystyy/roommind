@@ -276,6 +276,20 @@ export class RsHeroStatus extends LitElement {
         color: var(--secondary-text-color);
         opacity: 0.85;
       }
+      .shadow-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 10px;
+        color: var(--warning-color, #ffa726);
+        border: 1px solid var(--warning-color, #ffa726);
+      }
+      .shadow-badge ha-icon {
+        --mdc-icon-size: 13px;
+      }
       .why-pill ha-icon {
         --mdc-icon-size: 13px;
         opacity: 0.5;
@@ -583,6 +597,32 @@ export class RsHeroStatus extends LitElement {
                           ></ha-icon>
                         </span>
                       `
+                    : nothing}
+                  ${live?.confidence != null && this.config?.temperature_sensor && !live.mpc_active
+                    ? html`<span
+                        class="why-pill"
+                        title=${localize("model.confidence_hint", this.hass?.language ?? "en")}
+                      >
+                        <ha-icon icon="mdi:school-outline"></ha-icon>
+                        ${localize("model.confidence", this.hass?.language ?? "en")}
+                        ${Math.round(live.confidence * 100)}%
+                      </span>`
+                    : nothing}
+                  ${live?.slab_charge != null
+                    ? html`<span
+                        class="why-pill"
+                        title=${localize("model.slab_charge_hint", this.hass?.language ?? "en")}
+                      >
+                        <ha-icon icon="mdi:battery-heart-variant"></ha-icon>
+                        ${localize("model.slab_charge", this.hass?.language ?? "en")}
+                        ${live.slab_charge}%
+                      </span>`
+                    : nothing}
+                  ${this.config?.shadow_mode
+                    ? html`<span class="shadow-badge">
+                        <ha-icon icon="mdi:eye-outline"></ha-icon>
+                        ${localize("room.shadow_badge", this.hass?.language ?? "en")}
+                      </span>`
                     : nothing}
                   ${live?.decision_reason
                     ? html`
