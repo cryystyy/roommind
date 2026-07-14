@@ -689,11 +689,20 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         dewpoint_margin = settings.get("dewpoint_margin", DEFAULT_DEWPOINT_MARGIN)
         cooling_limited = ""
 
-        q_residual = self._residual_tracker.get_q_residual(
+        q_residual_raw = self._residual_tracker.get_q_residual(
             area_id,
             system_type,
             self._previous_modes.get(area_id, MODE_IDLE),
         )
+        # cold_residual_enabled gate — THE single choke point for control,
+        # optimizer series and EKF training: everything downstream (the MPC
+        # controller's residual series, prediction_std, drift prediction and
+        # q_residual_training) consumes this gated value.  Only the tracker's
+        # own bookkeeping (update()) and the analytics prediction seed in
+        # analytics_service.py read tracker state independently.
+        q_residual = q_residual_raw
+        if q_residual < 0 and not settings.get("cold_residual_enabled", True):
+            q_residual = 0.0
 
         # Read current cover positions for shading factor
         cover_eids: list[str] = room.get("covers", [])
@@ -950,13 +959,15 @@ class RoomMindCoordinator(DataUpdateCoordinator):
 
         # --- Residual heat transition tracking ---
         # After compressor constraints may have changed mode to IDLE.
+        # Bookkeeping gets the RAW signed residual: the cold_residual_enabled
+        # gate must not make heating state look "decayed" (0.0) early.
         if actuation_active and system_type:
             self._residual_tracker.update(
                 area_id,
                 mode,
                 power_fraction,
                 self._previous_modes.get(area_id, MODE_IDLE),
-                q_residual=q_residual,
+                q_residual=q_residual_raw,
             )
 
         if not climate_active:
@@ -1238,6 +1249,19 @@ class RoomMindCoordinator(DataUpdateCoordinator):
                 reason = "above_cool_target"
         elif not can_heat and not can_cool:
             reason = "no_capable_device"
+        elif (
+            mode == MODE_IDLE
+            and mpc_active
+            and current_temp is not None
+            and (
+                (can_cool and targets.cool is not None and current_temp > targets.cool)
+                or (can_heat and targets.heat is not None and current_temp < targets.heat)
+            )
+        ):
+            # Idle while outside the active band: the MPC is deliberately
+            # tolerating drift — coasting on the thermal mass (e.g. stored
+            # slab cold ahead of a scheduled cool-target rise).
+            reason = "mpc_coasting"
         elif mpc_active:
             reason = "mpc_plan_idle"
         else:

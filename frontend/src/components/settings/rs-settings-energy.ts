@@ -20,6 +20,7 @@ export class RsSettingsEnergy extends RsSettingsBase {
   @property({ type: Boolean }) public feelsLikeEnabled = false;
   @property({ type: Boolean }) public dewpointGuardEnabled = true;
   @property({ type: Number }) public dewpointMargin = 2.0;
+  @property({ type: Boolean }) public coldResidualEnabled = true;
 
   private _filterPower = (entity: HassEntity): boolean => {
     return entity.attributes?.device_class === "power";
@@ -142,6 +143,15 @@ export class RsSettingsEnergy extends RsSettingsBase {
               ></ha-textfield>
             `
           : ""}
+      </div>
+
+      <div class="settings-section">
+        <rs-toggle-row
+          .label=${localize("energy.cold_residual", l)}
+          .hint=${localize("energy.cold_residual_hint", l)}
+          .checked=${this.coldResidualEnabled}
+          @toggle-changed=${(e: CustomEvent) => this._fire("coldResidualEnabled", e.detail)}
+        ></rs-toggle-row>
       </div>
     `;
   }

@@ -361,3 +361,39 @@ QUEUED (agreed roadmap, not yet built — each is a session-sized L/XL item):
 
 Testing on Windows: use .venv, run pytest with -p no:homeassistant -p no:sugar
 (HA imports Unix-only fcntl via the pytest plugin).
+
+## ============================================================
+## STATUS UPDATE 2026-07-14 -- v1.8.1 + v1.9.0 SHIPPED (via Cowork/Fable)
+## ============================================================
+
+v1.8.1 (4 fixes from live Master Bedroom feedback):
+- Decision trace: mpc_precooling/mpc_preheating reasons when MPC conditions
+  at/inside target (was falsely 'above_cool_target' while pre-cooling for an
+  upcoming schedule block). coordinator._record_decision.
+- Slab SoC: ResidualHeatTracker tracks cooling transitions ('cold charge');
+  Slab % no longer stuck at 0 in summer. Display-only in 1.8.1.
+- rs-area-card: direction-aware single target in Auto (no bare heat-cool
+  range while cooling) + shadow badge on the dashboard card.
+
+v1.9.0 'coast on stored cold' (control change, live-validated PENDING first
+full evening):
+- get_q_residual now SIGNED: negative = residual cold after cooling runs,
+  scaled by the COOLING channel (Q_cool/beta_c) in RCModel.predict + ThermalEKF
+  (predict step, jacobian F[0][3], beta_c process noise) + compute_optimal_power.
+- Residual series (MPC + analytics simulator + analytics prediction seed) are
+  sign-preserving -> Analytics Prediction line now shows coast-up drift.
+- Gate: settings.cold_residual_enabled (default ON), single choke point in
+  coordinator after get_q_residual (clamps negatives when off); tracker
+  bookkeeping always gets the RAW value. websocket whitelist + schema updated
+  (BOTH, as always). Frontend toggle in Energy optimization panel.
+- New trace reason mpc_coasting (idle + mpc_active + outside active band).
+- Expected live behavior: with a cool-target step-up in lookahead (comfort->eco),
+  TABS rooms stop cooling ~1.5-2h early and drift up on stored cold.
+  VERIFY 07-15 evening: trace shows mpc_coasting pre-19:00 on Bedroom, no
+  comfort violation, energy drop vs baseline.
+- Energy optimization live config (2026-07-14): price_entity=sensor.energy_price
+  (fixed 1.2 RON/kWh MQTT sensor w/ 'prices' attr, retained), grid_export_entity=
+  sensor.huawei_solar_inverter_grid_power (positive=export), threshold 500W
+  (above EV car-first 300W buffer). COP curve intentionally UNSET in cooling
+  season (heating-oriented curve would bias toward hot afternoons); set real
+  NIMBUS datasheet values at heating season or build direction-aware EER.

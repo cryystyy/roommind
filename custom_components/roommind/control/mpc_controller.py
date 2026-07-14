@@ -1356,8 +1356,12 @@ class MPCController:
         return max(plan.temperatures[1:])  # Skip index 0 (current T)
 
     def _build_residual_series(self, n_blocks: int) -> list[float] | None:
-        """Build decaying residual heat series for MPC horizon."""
-        if self.q_residual <= 0 or not self._heating_system_type:
+        """Build a decaying signed residual series for the MPC horizon.
+
+        Positive entries = stored heat, negative = stored cold; both decay
+        toward zero with the system profile's tau.
+        """
+        if self.q_residual == 0.0 or not self._heating_system_type:
             return None
         from ..const import HEATING_SYSTEM_PROFILES, RESIDUAL_HEAT_CUTOFF
 
@@ -1370,7 +1374,7 @@ class MPCController:
         series: list[float] = []
         for i in range(n_blocks):
             q = self.q_residual * math.exp(-i * PLAN_DT_MINUTES / tau)
-            series.append(q if q >= RESIDUAL_HEAT_CUTOFF else 0.0)
+            series.append(q if abs(q) >= RESIDUAL_HEAT_CUTOFF else 0.0)
         return series
 
     async def async_apply(

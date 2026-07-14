@@ -327,21 +327,36 @@ async def build_analytics_data(
                     len(target_forecast),
                     shading_factor=_shading,
                 )
-                # Residual heat state for analytics simulation
+                # Signed residual state (stored heat > 0 / stored cold < 0)
+                # for the analytics simulation.  Mirrors
+                # ResidualHeatTracker.get_q_residual: the direction with the
+                # more recent off-transition wins.  The cooling side honours
+                # the cold_residual_enabled gate here; the control-path gate
+                # is the coordinator's update-cycle clamp.
                 system_type = room_config.get("heating_system_type", "")
                 sim_q_residual = 0.0
                 sim_heat_dur = 0.0
                 sim_last_pf = 1.0
-                if system_type and area_id in getattr(coordinator._residual_tracker, "_off_since", {}):
+                tracker = coordinator._residual_tracker
+                heat_off = getattr(tracker, "_off_since", {}).get(area_id)
+                cool_off = getattr(tracker, "_cool_off_since", {}).get(area_id)
+                if not settings.get("cold_residual_enabled", True):
+                    cool_off = None
+                if system_type and (heat_off is not None or cool_off is not None):
                     import time as _time
 
-                    off_since = coordinator._residual_tracker._off_since[area_id]
-                    elapsed = (_time.time() - off_since) / 60.0
-                    sim_heat_dur = (off_since - coordinator._residual_tracker._on_since.get(area_id, off_since)) / 60.0
-                    sim_last_pf = coordinator._residual_tracker._off_power.get(area_id, 1.0)
                     from ..control.residual_heat import compute_residual_heat
 
-                    sim_q_residual = compute_residual_heat(elapsed, system_type, sim_last_pf, sim_heat_dur)
+                    if heat_off is not None and (cool_off is None or heat_off >= cool_off):
+                        elapsed = (_time.time() - heat_off) / 60.0
+                        sim_heat_dur = (heat_off - tracker._on_since.get(area_id, heat_off)) / 60.0
+                        sim_last_pf = tracker._off_power.get(area_id, 1.0)
+                        sim_q_residual = compute_residual_heat(elapsed, system_type, sim_last_pf, sim_heat_dur)
+                    else:
+                        elapsed = (_time.time() - cool_off) / 60.0
+                        sim_heat_dur = (cool_off - tracker._cool_on_since.get(area_id, cool_off)) / 60.0
+                        sim_last_pf = tracker._cool_off_power.get(area_id, 1.0)
+                        sim_q_residual = -compute_residual_heat(elapsed, system_type, sim_last_pf, sim_heat_dur)
 
                 sim_q_occupancy = 0.0
                 for occ_eid in room_config.get("occupancy_sensors", []):

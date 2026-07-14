@@ -1218,6 +1218,34 @@ async def test_save_settings_mold_fields(ws_hass, store, connection):
 
 
 @pytest.mark.asyncio
+async def test_save_settings_cold_residual_roundtrip(ws_hass, store, connection):
+    """cold_residual_enabled must pass BOTH the save schema and the field whitelist."""
+    await store.async_load()
+
+    msg = {
+        "id": 32,
+        "type": "roommind/settings/save",
+        "cold_residual_enabled": False,
+    }
+    await _save_settings(ws_hass, connection, msg)
+
+    connection.send_result.assert_called_once()
+    result = connection.send_result.call_args[0][1]
+    assert result["settings"]["cold_residual_enabled"] is False
+
+    # And back on again
+    connection.send_result.reset_mock()
+    msg = {
+        "id": 33,
+        "type": "roommind/settings/save",
+        "cold_residual_enabled": True,
+    }
+    await _save_settings(ws_hass, connection, msg)
+    result = connection.send_result.call_args[0][1]
+    assert result["settings"]["cold_residual_enabled"] is True
+
+
+@pytest.mark.asyncio
 async def test_save_settings_mold_partial_update(ws_hass, store, connection):
     """Updating only one mold field should not affect others (merge behavior)."""
     await store.async_load()

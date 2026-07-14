@@ -74,6 +74,7 @@ export class RsSettings extends LitElement {
   @state() private _feelsLikeEnabled = false;
   @state() private _dewpointGuardEnabled = true;
   @state() private _dewpointMargin = 2.0;
+  @state() private _coldResidualEnabled = true;
   @state() private _boostAppliedAt: Record<string, number> = {};
   @state() private _loaded = false;
 
@@ -143,6 +144,7 @@ export class RsSettings extends LitElement {
       this._feelsLikeEnabled = s.feels_like_enabled ?? false;
       this._dewpointGuardEnabled = s.dewpoint_guard_enabled ?? true;
       this._dewpointMargin = s.dewpoint_margin ?? 2.0;
+      this._coldResidualEnabled = s.cold_residual_enabled ?? true;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.debug("[RoomMind] loadSettings:", err);
@@ -202,6 +204,7 @@ export class RsSettings extends LitElement {
           .feelsLikeEnabled=${this._feelsLikeEnabled}
           .dewpointGuardEnabled=${this._dewpointGuardEnabled}
           .dewpointMargin=${this._dewpointMargin}
+          .coldResidualEnabled=${this._coldResidualEnabled}
           @setting-changed=${this._onSettingChanged}
         ></rs-settings-energy>
       </rs-settings-panel>
@@ -414,6 +417,7 @@ export class RsSettings extends LitElement {
         feels_like_enabled: this._feelsLikeEnabled,
         dewpoint_guard_enabled: this._dewpointGuardEnabled,
         dewpoint_margin: this._dewpointMargin,
+        cold_residual_enabled: this._coldResidualEnabled,
       });
       fireSaveStatus(this, "saved");
     } catch {

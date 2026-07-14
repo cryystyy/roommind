@@ -192,6 +192,7 @@ export interface GlobalSettings {
   feels_like_enabled?: boolean;
   dewpoint_guard_enabled?: boolean;
   dewpoint_margin?: number;
+  cold_residual_enabled?: boolean;
 }
 
 // HA types for panel integration

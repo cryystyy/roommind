@@ -524,3 +524,110 @@ def test_remove_room_and_clear_all_clear_cooling_dicts():
     assert len(tracker._cool_off_since) == 0
     assert len(tracker._cool_on_since) == 0
     assert len(tracker._cool_off_power) == 0
+
+
+# ---------------------------------------------------------------------------
+# get_q_residual – signed cold residual (cooling coast-down)
+# ---------------------------------------------------------------------------
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_get_q_residual_cooling_returns_negative_with_correct_magnitude(mock_time):
+    """A finished cooling run yields a NEGATIVE residual with heating-formula magnitude."""
+    from custom_components.roommind.control.residual_heat import compute_residual_heat
+
+    now = 200_000.0
+    mock_time.time.return_value = now
+    tracker = ResidualHeatTracker()
+    # Cooled for 4 h, stopped 10 min ago, at 80 % power
+    _seed_cooling(tracker, "room1", off_since=now - 600.0, on_since=now - 600.0 - 4 * 3600.0, power=0.8)
+
+    result = tracker.get_q_residual("room1", "tabs", MODE_IDLE)
+
+    expected_mag = compute_residual_heat(10.0, "tabs", 0.8, 240.0)
+    assert expected_mag > 0.0
+    assert result == pytest.approx(-expected_mag, abs=1e-9)
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_get_q_residual_cooling_decays_toward_zero(mock_time):
+    """The cold residual magnitude decays as time since the off-transition grows."""
+    now = 200_000.0
+    tracker = ResidualHeatTracker()
+    _seed_cooling(tracker, "room1", off_since=now, on_since=now - 4 * 3600.0, power=1.0)
+
+    mock_time.time.return_value = now + 600.0  # 10 min after stop
+    early = tracker.get_q_residual("room1", "tabs", MODE_IDLE)
+    mock_time.time.return_value = now + 4 * 3600.0  # 4 h after stop
+    late = tracker.get_q_residual("room1", "tabs", MODE_IDLE)
+
+    assert early < late < 0.0  # both negative, magnitude shrinking
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_get_q_residual_cooling_suppressed_while_cooling(mock_time):
+    """While previous_mode is COOLING the cold residual reads 0 (mirror of heating)."""
+    now = 200_000.0
+    mock_time.time.return_value = now
+    tracker = ResidualHeatTracker()
+    _seed_cooling(tracker, "room1", off_since=now - 600.0, on_since=now - 4000.0, power=1.0)
+
+    assert tracker.get_q_residual("room1", "tabs", MODE_COOLING) == 0.0
+    assert tracker.get_q_residual("room1", "tabs", MODE_IDLE) < 0.0
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_get_q_residual_most_recent_off_transition_wins(mock_time):
+    """Season change: with both residual states, the newer off-transition's sign wins."""
+    now = 200_000.0
+    mock_time.time.return_value = now
+    tracker = ResidualHeatTracker()
+    tracker._off_since["room1"] = now - 3600.0  # heating stopped 60 min ago
+    tracker._on_since["room1"] = now - 3600.0 - 7200.0
+    tracker._off_power["room1"] = 1.0
+    _seed_cooling(tracker, "room1", off_since=now - 600.0, on_since=now - 600.0 - 7200.0, power=1.0)
+
+    # Cooling stopped more recently → negative
+    assert tracker.get_q_residual("room1", "tabs", MODE_IDLE) < 0.0
+
+    # Flip recency: heating stopped more recently → positive
+    tracker._off_since["room1"] = now - 300.0
+    assert tracker.get_q_residual("room1", "tabs", MODE_IDLE) > 0.0
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_get_q_residual_heating_regression_byte_identical(mock_time):
+    """Heating-only state: value identical to the pre-signed formula (incl. stale cool state)."""
+    now = 5000.0
+    mock_time.time.return_value = now
+    tracker = ResidualHeatTracker()
+    tracker._off_since["room1"] = 4500.0
+    tracker._on_since["room1"] = 1000.0
+    tracker._off_power["room1"] = 1.0
+
+    charge = 1 - math.exp(-(3500.0 / 60.0) / 60.0)
+    expected = 0.85 * charge * math.exp(-(500.0 / 60.0) / 90.0) * 1.0
+    assert tracker.get_q_residual("room1", "underfloor", MODE_IDLE) == pytest.approx(expected, abs=1e-9)
+
+    # An OLDER cooling off-transition must not change the heating result
+    _seed_cooling(tracker, "room1", off_since=4000.0, on_since=2000.0, power=1.0)
+    assert tracker.get_q_residual("room1", "underfloor", MODE_IDLE) == pytest.approx(expected, abs=1e-9)
+
+    # Heating residual still visible while actively cooling (pre-existing behavior)
+    assert tracker.get_q_residual("room1", "underfloor", MODE_COOLING) == pytest.approx(expected, abs=1e-9)
+
+
+@patch("custom_components.roommind.managers.residual_heat_tracker.time")
+def test_update_negative_residual_keeps_heating_state(mock_time):
+    """A negative (cold) residual is not 'heating decayed to 0' — heating state stays."""
+    mock_time.time.return_value = 10_000.0
+    tracker = ResidualHeatTracker()
+    tracker._off_since["room1"] = 9000.0
+    tracker._off_power["room1"] = 0.8
+    tracker._on_since["room1"] = 8000.0
+    _seed_cooling(tracker, "room1", off_since=9500.0, on_since=9200.0, power=1.0)
+
+    tracker.update("room1", MODE_IDLE, 0.0, MODE_IDLE, q_residual=-0.4)
+
+    assert "room1" in tracker._off_since
+    assert "room1" in tracker._cool_off_since

@@ -85,7 +85,9 @@ class RCModel:
             Q_active: active power [W] (positive = heating, negative = cooling).
             dt_minutes: time step in minutes.
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
-            q_residual: residual heat fraction from thermal mass (0–1).
+            q_residual: signed residual fraction from thermal mass (−1..1):
+                positive = stored heat (fraction of Q_heat), negative =
+                stored cold from a previous cooling run (fraction of Q_cool).
             q_occupancy: occupancy signal (0 = unoccupied, 1 = occupied).
 
         Returns:
@@ -94,8 +96,16 @@ class RCModel:
         if dt_minutes <= 0:
             return T_room
         dt_hours = dt_minutes / 60.0
-        # Residual heat: only contributes when HVAC is off (no double-counting)
-        Q_residual = self.Q_heat * q_residual if Q_active == 0.0 and q_residual > 0 else 0.0
+        # Residual thermal-mass flux: only contributes when HVAC is off (no
+        # double-counting).  Sign selects the channel: stored heat scales by
+        # the heating rate, stored cold by the cooling rate (q_residual < 0
+        # makes the product negative = heat absorbed by the mass).
+        if Q_active == 0.0 and q_residual > 0:
+            Q_residual = self.Q_heat * q_residual
+        elif Q_active == 0.0 and q_residual < 0:
+            Q_residual = self.Q_cool * q_residual
+        else:
+            Q_residual = 0.0
         # Total thermal input including solar gain, occupancy heat, and residual heat
         Q_total = Q_active + self.Q_solar * q_solar + self.Q_occupancy * q_occupancy + Q_residual
         # Equilibrium temperature: T_out + Q/U
@@ -151,7 +161,8 @@ class RCModel:
             Q_active_series: active power per step [W].
             dt_minutes: duration of each step in minutes.
             q_solar_series: normalized solar irradiance per step (GHI/1000).
-            q_residual_series: residual heat fraction per step (0–1).
+            q_residual_series: signed residual fraction per step (−1..1,
+                positive = stored heat, negative = stored cold).
             q_occupancy_series: occupancy signal per step (0 or 1).
 
         Returns:
@@ -552,7 +563,9 @@ class ThermalEKF:
             dt_minutes: time since last call [min].
             power_fraction: fraction of max heating/cooling power applied (0-1).
             q_solar: normalized solar irradiance (GHI/1000, 0–1).
-            q_residual: residual heat fraction from thermal mass (0–1).
+            q_residual: signed residual fraction from thermal mass (−1..1,
+                positive = stored heat via beta_h, negative = stored cold
+                via beta_c).
             q_occupancy: occupancy signal (0 = unoccupied, 1 = occupied).
         """
         if dt_minutes <= 0:
@@ -659,8 +672,8 @@ class ThermalEKF:
 
         F[0][0] = dT_new/dT
         F[0][1] = dT_new/d_alpha
-        F[0][2] = dT_new/d_beta_h  (nonzero during heating, or idle with residual)
-        F[0][3] = dT_new/d_beta_c  (nonzero only during cooling)
+        F[0][2] = dT_new/d_beta_h  (nonzero during heating, or idle with q_residual > 0)
+        F[0][3] = dT_new/d_beta_c  (nonzero during cooling, or idle with q_residual < 0)
         F[0][4] = dT_new/d_beta_s  (nonzero only when q_solar > 0)
         F[0][5] = dT_new/d_beta_o  (nonzero only when q_occupancy > 0)
         F[1..5][1..5] = I           (parameters are random walk)
@@ -684,6 +697,10 @@ class ThermalEKF:
                 F[0][3] = -power_fraction * dt_h
             elif mode == "idle" and q_residual > 0:
                 F[0][2] = q_residual * dt_h
+            elif mode == "idle" and q_residual < 0:
+                # Residual cold: u = beta_c * q_residual, so the derivative
+                # carries q_residual's negative sign (mirrors cooling).
+                F[0][3] = q_residual * dt_h
             # Solar: dT_new/d_beta_s = q_solar * dt_h
             F[0][4] = q_solar * dt_h
             # Occupancy: dT_new/d_beta_o = q_occupancy * dt_h
@@ -700,6 +717,9 @@ class ThermalEKF:
                 F[0][3] = -power_fraction * (1.0 / alpha) * one_minus_decay
             elif mode == "idle" and q_residual > 0:
                 F[0][2] = q_residual * (1.0 / alpha) * one_minus_decay
+            elif mode == "idle" and q_residual < 0:
+                # Residual cold: u = beta_c * q_residual (negative derivative)
+                F[0][3] = q_residual * (1.0 / alpha) * one_minus_decay
             # Solar: dT_new/d_beta_s = q_solar * (1/alpha) * (1 - exp(-alpha*dt))
             F[0][4] = q_solar * (1.0 / alpha) * one_minus_decay
             # Occupancy: dT_new/d_beta_o = q_occupancy * (1/alpha) * (1 - exp(-alpha*dt))
@@ -720,8 +740,14 @@ class ThermalEKF:
         """EKF predict: propagate state and covariance forward."""
         T, alpha, beta_h, beta_c, beta_s, beta_o = self._x
         u_hvac = self._mode_to_u(mode) * power_fraction
-        # Residual heat: during idle, thermal mass continues releasing stored energy
-        u_residual = beta_h * q_residual if mode == "idle" and q_residual > 0 else 0.0
+        # Residual thermal mass: during idle the mass keeps releasing stored
+        # heat (q_residual > 0, beta_h channel) or absorbing heat from a
+        # previous cooling run (q_residual < 0, beta_c channel → u negative).
+        u_residual = 0.0
+        if mode == "idle" and q_residual > 0:
+            u_residual = beta_h * q_residual
+        elif mode == "idle" and q_residual < 0:
+            u_residual = beta_c * q_residual
         # Occupancy heat: always additive (not mode-gated)
         u = u_hvac + beta_s * q_solar + beta_o * q_occupancy + u_residual
 
@@ -758,7 +784,7 @@ class ThermalEKF:
             self._Q_T,
             q_alpha,
             self._Q_BETA_H if (mode == "heating" or (mode == "idle" and q_residual > 0)) else 0.0,
-            self._Q_BETA_C if mode == "cooling" else 0.0,
+            self._Q_BETA_C if (mode == "cooling" or (mode == "idle" and q_residual < 0)) else 0.0,
             self._Q_BETA_S if q_solar > 0 else 0.0,
             self._Q_BETA_O if q_occupancy > 0 else 0.0,
         ]

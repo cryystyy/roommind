@@ -2122,3 +2122,75 @@ def test_ekf_mode_transition_does_not_inflate_alpha():
     # alpha must be near truth (0.2), not drifted to the upper bound
     assert ekf._x[1] < 1.0, f"alpha drifted far above true value: {ekf._x[1]}"
     assert ekf._x[1] > 0.05, f"alpha collapsed: {ekf._x[1]}"
+
+
+# ---------------------------------------------------------------------------
+# Signed cold residual (cooling coast-down)
+# ---------------------------------------------------------------------------
+
+
+def test_rc_model_negative_residual_uses_cooling_channel():
+    """q_residual < 0 must scale by Q_cool (stored cold), not Q_heat."""
+    model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=2.0)
+    # T_out == T_room isolates the residual term
+    result = model.predict(25.0, 25.0, 0.0, 60.0, q_residual=-0.5)
+
+    # Expected via the cooling channel: Q_total = Q_cool * (-0.5) = -1.0
+    T_eq = 25.0 + (2.0 * -0.5) / 0.05
+    expected = T_eq + (25.0 - T_eq) * math.exp(-0.05 * 1.0)
+    assert result == pytest.approx(expected, abs=1e-9)
+
+    # Distinct from the (wrong) heating channel: Q_heat * (-0.5) = -0.4
+    T_eq_wrong = 25.0 + (0.8 * -0.5) / 0.05
+    wrong = T_eq_wrong + (25.0 - T_eq_wrong) * math.exp(-0.05 * 1.0)
+    assert abs(result - wrong) > 0.1
+
+    # Room must drift DOWN on stored cold
+    assert result < 25.0
+
+
+def test_rc_model_positive_residual_unchanged():
+    """q_residual > 0 keeps the legacy heating-channel behavior."""
+    model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=2.0)
+    result = model.predict(25.0, 25.0, 0.0, 60.0, q_residual=0.5)
+    T_eq = 25.0 + (0.8 * 0.5) / 0.05
+    expected = T_eq + (25.0 - T_eq) * math.exp(-0.05 * 1.0)
+    assert result == pytest.approx(expected, abs=1e-9)
+
+
+def test_rc_model_negative_residual_ignored_while_active():
+    """Residual (either sign) only applies when HVAC is off (no double-counting)."""
+    model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=2.0)
+    with_residual = model.predict(25.0, 25.0, -2.0, 60.0, q_residual=-0.5)
+    without = model.predict(25.0, 25.0, -2.0, 60.0, q_residual=0.0)
+    assert with_residual == pytest.approx(without, abs=1e-12)
+
+
+def test_ekf_idle_cold_residual_trains_beta_c_not_beta_h():
+    """Idle updates with q_residual < 0 must adapt beta_c and leave beta_h frozen."""
+    ekf = ThermalEKF(T_init=25.0, system_type="tabs")
+    ekf.update(T_measured=25.0, T_outdoor=25.0, mode="idle", dt_minutes=3.0)  # init
+    beta_h0, beta_c0 = ekf._x[2], ekf._x[3]
+
+    # Room cools slightly faster than the model expects while coasting on
+    # stored cold → the filter should attribute this to beta_c.
+    for _ in range(20):
+        T_pred = ekf.get_model().predict(ekf._x[0], 25.0, 0.0, 3.0, q_residual=-0.5)
+        ekf.update(T_measured=T_pred - 0.05, T_outdoor=25.0, mode="idle", dt_minutes=3.0, q_residual=-0.5)
+
+    assert ekf._x[2] == pytest.approx(beta_h0, abs=1e-9), "beta_h must stay frozen"
+    assert ekf._x[3] != pytest.approx(beta_c0, abs=1e-6), "beta_c must learn from cold residual"
+
+
+def test_ekf_idle_warm_residual_regression_trains_beta_h_not_beta_c():
+    """Mirror control: q_residual > 0 during idle still trains beta_h only."""
+    ekf = ThermalEKF(T_init=25.0, system_type="tabs")
+    ekf.update(T_measured=25.0, T_outdoor=25.0, mode="idle", dt_minutes=3.0)  # init
+    beta_h0, beta_c0 = ekf._x[2], ekf._x[3]
+
+    for _ in range(20):
+        T_pred = ekf.get_model().predict(ekf._x[0], 25.0, 0.0, 3.0, q_residual=0.5)
+        ekf.update(T_measured=T_pred + 0.05, T_outdoor=25.0, mode="idle", dt_minutes=3.0, q_residual=0.5)
+
+    assert ekf._x[3] == pytest.approx(beta_c0, abs=1e-9), "beta_c must stay frozen"
+    assert ekf._x[2] != pytest.approx(beta_h0, abs=1e-6), "beta_h must learn from warm residual"

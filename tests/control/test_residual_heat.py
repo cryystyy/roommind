@@ -160,3 +160,22 @@ def test_tau_zero_returns_zero():
     with patch.object(rh, "HEATING_SYSTEM_PROFILES", fake_profiles):
         result = rh.compute_residual_heat(5.0, "zero_tau", 1.0, 60.0)
     assert result == 0.0
+
+
+def test_decay_residual_heat_preserves_negative_sign():
+    """A negative (stored cold) residual decays toward zero from below."""
+    import math
+
+    from custom_components.roommind.control.residual_heat import decay_residual_heat
+
+    decayed = decay_residual_heat(-0.6, 120.0, "tabs")
+    assert abs(decayed - (-0.6 * math.exp(-120.0 / 240.0))) < 1e-9
+    assert decayed < 0.0
+
+    # Positive path unchanged
+    decayed_pos = decay_residual_heat(0.6, 120.0, "tabs")
+    assert abs(decayed_pos - 0.6 * math.exp(-120.0 / 240.0)) < 1e-9
+
+    # Cutoff applies to the magnitude for both signs
+    assert decay_residual_heat(-0.021, 600.0, "tabs") == 0.0
+    assert decay_residual_heat(0.0, 60.0, "tabs") == 0.0

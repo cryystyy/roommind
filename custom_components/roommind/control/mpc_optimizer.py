@@ -392,12 +392,15 @@ class MPCOptimizer:
             T_drift += beta * self.model.Q_solar * q_solar / alpha
         else:
             T_drift += self.model.Q_solar * q_solar * dt_h
-        # Add residual heat from thermal mass to drift
-        if q_residual > 0:
+        # Add signed residual from thermal mass to drift: stored heat scales
+        # by the heating rate, stored cold (q_residual < 0) by the cooling
+        # rate — the negative product pulls the drift down.
+        if q_residual != 0.0:
+            q_channel = self.model.Q_heat if q_residual > 0 else self.model.Q_cool
             if alpha > 0.01:
-                T_drift += beta * self.model.Q_heat * q_residual / alpha
+                T_drift += beta * q_channel * q_residual / alpha
             else:
-                T_drift += self.model.Q_heat * q_residual * dt_h
+                T_drift += q_channel * q_residual * dt_h
         # Add predicted occupancy gain to drift
         if q_occupancy > 0:
             if alpha > 0.01:

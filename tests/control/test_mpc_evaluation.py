@@ -989,3 +989,47 @@ def test_mpc_guard_horizon_extended_for_ufh(monkeypatch):
     )
     mode, _ = ctrl._evaluate_mpc(21.0, TargetTemps(heat=21.0, cool=25.0))
     assert mode == MODE_HEATING, "Extended guard horizon for UFH should allow heating at mild outdoor=19°C"
+
+
+# ---------------------------------------------------------------------------
+# _build_residual_series — signed cold residual
+# ---------------------------------------------------------------------------
+
+
+class TestBuildResidualSeriesSigned:
+    """The optimizer's residual series must carry the cold (negative) sign."""
+
+    @staticmethod
+    def _ctrl(q_residual):
+        return MPCController(
+            build_hass(),
+            make_room(heating_system_type="tabs"),
+            model_manager=RoomModelManager(),
+            settings={},
+            q_residual=q_residual,
+            heating_system_type="tabs",
+        )
+
+    def test_negative_residual_series_stays_negative_and_decays(self):
+        series = self._ctrl(-0.6)._build_residual_series(12)
+        assert series is not None
+        assert series[0] == pytest.approx(-0.6, abs=1e-9)
+        assert all(s <= 0.0 for s in series)
+        # Decays toward zero from below (magnitude shrinks)
+        assert series[0] < series[1] < 0.0
+
+    def test_positive_residual_series_unchanged(self):
+        series = self._ctrl(0.6)._build_residual_series(12)
+        assert series is not None
+        assert series[0] == pytest.approx(0.6, abs=1e-9)
+        assert series[0] > series[1] > 0.0
+
+    def test_zero_residual_returns_none(self):
+        assert self._ctrl(0.0)._build_residual_series(12) is None
+
+    def test_small_negative_residual_cut_off(self):
+        # |q| below RESIDUAL_HEAT_CUTOFF (0.02) is treated as zero
+        series = self._ctrl(-0.021)._build_residual_series(12)
+        assert series is not None
+        assert series[0] == pytest.approx(-0.021, abs=1e-9)
+        assert series[-1] == 0.0

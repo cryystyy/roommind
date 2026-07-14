@@ -262,11 +262,12 @@ def _simulate_mpc(
     T = current_temp
     prev_action = MODE_IDLE
     blocks_in_action = 0
-    # Track residual heat through simulated mode transitions
-    sim_residual_elapsed = 0.0  # minutes since simulated heating stopped
-    sim_heating_blocks = 0  # blocks of simulated heating for charge fraction
-    sim_was_heating = False
-    # Seed with real residual state
+    # Track signed residual (stored heat > 0 / stored cold < 0) through
+    # simulated mode transitions
+    sim_residual_elapsed = 0.0  # minutes since the simulated run stopped
+    sim_active_blocks = 0  # blocks of the last simulated run (charge fraction)
+    sim_residual_sign = 0.0  # +1 after simulated heating, -1 after cooling
+    # Seed with real (signed) residual state
     current_q_residual = q_residual
     pred_temps: list[float] = []
 
@@ -301,22 +302,25 @@ def _simulate_mpc(
                 for tf in target_forecast[i:]
             ]
             remaining_solar = solar_series[i:] if solar_series else None
-            # Build residual series for remaining blocks
+            # Build signed residual series for remaining blocks
             remaining_residual = None
-            if heating_system_type and current_q_residual > 0:
-                if sim_was_heating:
+            if heating_system_type and current_q_residual != 0.0:
+                if sim_residual_sign != 0.0:
                     remaining_residual = build_residual_series(
                         sim_residual_elapsed,
                         heating_system_type,
                         len(remaining_outdoor),
                         5.0,
                         last_power_fraction,
-                        sim_heating_blocks * 5.0,
+                        sim_active_blocks * 5.0,
                     )
+                    if sim_residual_sign < 0:
+                        remaining_residual = [-r for r in remaining_residual]
                 else:
                     # Seeded (pre-simulation) residual: the real time since
-                    # heating stopped is unknown, so decay the current value
-                    # forward instead of restarting elapsed at 0.
+                    # the run stopped is unknown, so decay the current value
+                    # forward instead of restarting elapsed at 0
+                    # (decay_residual_heat is sign-preserving).
                     remaining_residual = [
                         decay_residual_heat(current_q_residual, k * 5.0, heating_system_type)
                         for k in range(len(remaining_outdoor))
@@ -352,22 +356,26 @@ def _simulate_mpc(
         )
         T = max(5.0, min(40.0, T_new))
 
-        # Update simulated residual tracking
-        if action == MODE_HEATING:
-            sim_heating_blocks += 1
-            sim_was_heating = True
+        # Update simulated residual tracking (signed: a heating run charges
+        # the mass with heat, a cooling run with cold)
+        if action in (MODE_HEATING, MODE_COOLING):
+            new_sign = 1.0 if action == MODE_HEATING else -1.0
+            if sim_residual_sign != new_sign:
+                sim_active_blocks = 0  # direction change: recharge from zero
+            sim_active_blocks += 1
+            sim_residual_sign = new_sign
             sim_residual_elapsed = 0.0
             current_q_residual = 0.0
         else:
             sim_residual_elapsed += 5.0
-            if heating_system_type and sim_was_heating:
+            if heating_system_type and sim_residual_sign != 0.0:
                 from .residual_heat import compute_residual_heat
 
-                current_q_residual = compute_residual_heat(
+                current_q_residual = sim_residual_sign * compute_residual_heat(
                     sim_residual_elapsed,
                     heating_system_type,
                     last_power_fraction,
-                    sim_heating_blocks * 5.0,
+                    sim_active_blocks * 5.0,
                 )
             elif heating_system_type:
                 # Seeded residual must decay with simulated time too — an
@@ -415,10 +423,11 @@ def _simulate_bangbang(
     T = current_temp
     sim_mode = MODE_IDLE
     blocks_in_mode = 0
-    # Track residual heat through simulated mode transitions
+    # Track signed residual (stored heat > 0 / stored cold < 0) through
+    # simulated mode transitions
     sim_residual_elapsed = 0.0
-    sim_heating_blocks = 0
-    sim_was_heating = False
+    sim_active_blocks = 0
+    sim_residual_sign = 0.0  # +1 after simulated heating, -1 after cooling
     current_q_residual = q_residual
     pred_temps: list[float] = []
 
@@ -476,22 +485,26 @@ def _simulate_bangbang(
         T = max(5.0, min(40.0, T_new))
         blocks_in_mode += 1
 
-        # Update simulated residual tracking
-        if sim_mode == MODE_HEATING:
-            sim_heating_blocks += 1
-            sim_was_heating = True
+        # Update simulated residual tracking (signed: a heating run charges
+        # the mass with heat, a cooling run with cold)
+        if sim_mode in (MODE_HEATING, MODE_COOLING):
+            new_sign = 1.0 if sim_mode == MODE_HEATING else -1.0
+            if sim_residual_sign != new_sign:
+                sim_active_blocks = 0  # direction change: recharge from zero
+            sim_active_blocks += 1
+            sim_residual_sign = new_sign
             sim_residual_elapsed = 0.0
             current_q_residual = 0.0
         else:
             sim_residual_elapsed += 5.0
-            if heating_system_type and sim_was_heating:
+            if heating_system_type and sim_residual_sign != 0.0:
                 from .residual_heat import compute_residual_heat
 
-                current_q_residual = compute_residual_heat(
+                current_q_residual = sim_residual_sign * compute_residual_heat(
                     sim_residual_elapsed,
                     heating_system_type,
                     last_power_fraction,
-                    sim_heating_blocks * 5.0,
+                    sim_active_blocks * 5.0,
                 )
             elif heating_system_type:
                 # Seeded residual must decay with simulated time too — an

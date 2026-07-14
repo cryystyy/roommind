@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from custom_components.roommind.const import MIN_POWER_FRACTION, MODE_COOLING, MODE_HEATING
+from custom_components.roommind.const import MIN_POWER_FRACTION, MODE_COOLING, MODE_HEATING, MODE_IDLE
 from custom_components.roommind.control.mpc_optimizer import MPCOptimizer, MPCPlan
 from custom_components.roommind.control.thermal_model import RCModel
 
@@ -792,3 +792,79 @@ def test_approach_rate_widens_cooling_band_symmetrically():
     assert m1 == MODE_COOLING and m2 == MODE_COOLING
     assert pf_gentle < pf_full
     assert pf_gentle >= MIN_POWER_FRACTION
+
+
+# ---------------------------------------------------------------------------
+# Signed cold residual (cooling coast-down)
+# ---------------------------------------------------------------------------
+
+
+def _tabs_cool_optimizer():
+    """Cool-only TABS room with a C=1-normalized model (tabs cold-start priors)."""
+    model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=1.0)
+    return MPCOptimizer(
+        model=model,
+        can_heat=False,
+        can_cool=True,
+        w_comfort=7.0,
+        w_energy=3.0,
+        min_run_blocks=9,  # tabs: 45 min / 5 min blocks
+        outdoor_cooling_min=16.0,
+        heating_system_type="tabs",
+    )
+
+
+def _coast_scenario_plan(residual_series):
+    """Room 0.3°C above the cool target, eco step-up (25→26) after 90 min."""
+    n = 36  # 3 h horizon
+    return _tabs_cool_optimizer().optimize(
+        T_room=25.3,
+        T_outdoor_series=[28.0] * n,
+        heat_target_series=[20.0] * n,
+        cool_target_series=[25.0] * 18 + [26.0] * (n - 18),
+        dt_minutes=5.0,
+        residual_series=residual_series,
+        cost_series=[1.0] * n,  # economic energy term at unit cost
+    )
+
+
+def test_tabs_cold_residual_coasts_to_target_rise():
+    """Stored slab cold lets the MPC idle through an upcoming cool-target rise."""
+    residual = [-0.6 * math.exp(-i * 5.0 / 240.0) for i in range(36)]  # tabs tau decay
+    plan = _coast_scenario_plan(residual)
+    assert plan.actions[0] == MODE_IDLE
+    # The stored cold pulls the room down while idling (coast-down drift)
+    assert plan.temperatures[1] < plan.temperatures[0]
+    assert plan.power_fractions[0] == 0.0
+
+
+def test_tabs_no_residual_cools_before_target_rise():
+    """Control: without stored cold the same scenario starts a cooling run."""
+    plan = _coast_scenario_plan(None)
+    assert plan.actions[0] == MODE_COOLING
+
+
+def test_optimize_applies_negative_residual_only_on_idle_blocks():
+    """Forward simulation credits stored cold on idle blocks (temps drift down)."""
+    residual = [-0.6] * 12
+    opt = _tabs_cool_optimizer()
+    plan = opt.optimize(
+        T_room=25.5,
+        T_outdoor_series=[25.5] * 12,  # no envelope exchange: isolate residual
+        heat_target_series=[20.0] * 12,
+        cool_target_series=[26.5] * 12,  # in deadband → idle plan
+        dt_minutes=5.0,
+        residual_series=residual,
+    )
+    assert all(a == MODE_IDLE for a in plan.actions)
+    assert plan.temperatures[-1] < plan.temperatures[0]
+
+
+def test_compute_optimal_power_negative_residual_idles_near_target():
+    """Just above the cool target, the cold-drift covers the gap -> no active cooling."""
+    opt = _tabs_cool_optimizer()
+    pf_with, mode_with = opt.compute_optimal_power(25.05, 28.0, 25.0, 5.0, q_residual=-0.6)
+    pf_without, mode_without = opt.compute_optimal_power(25.05, 28.0, 25.0, 5.0, q_residual=0.0)
+    assert (pf_with, mode_with) == (0.0, MODE_IDLE)
+    assert mode_without == MODE_COOLING
+    assert pf_without >= MIN_POWER_FRACTION

@@ -150,6 +150,7 @@ _SETTINGS_SAVE_FIELDS = (
     "pv_export_threshold_w",
     "hp_cop_at_minus7",
     "hp_cop_at_plus7",
+    "cold_residual_enabled",
 )
 
 
@@ -666,6 +667,7 @@ async def websocket_get_settings(
         vol.Optional("pv_export_threshold_w"): vol.All(vol.Coerce(float), vol.Range(min=0, max=20000)),
         vol.Optional("hp_cop_at_minus7"): vol.All(vol.Coerce(float), vol.Range(min=0, max=8)),
         vol.Optional("hp_cop_at_plus7"): vol.All(vol.Coerce(float), vol.Range(min=0, max=8)),
+        vol.Optional("cold_residual_enabled"): bool,
         vol.Optional("compressor_groups"): [
             {
                 vol.Required("id"): str,

@@ -461,6 +461,9 @@ class TestBuildAnalyticsData:
         coordinator._residual_tracker._off_since = {"room1": now - 300}
         coordinator._residual_tracker._on_since = {"room1": now - 900}
         coordinator._residual_tracker._off_power = {"room1": 0.8}
+        coordinator._residual_tracker._cool_off_since = {}
+        coordinator._residual_tracker._cool_on_since = {}
+        coordinator._residual_tracker._cool_off_power = {}
 
         detail_rows = [
             {

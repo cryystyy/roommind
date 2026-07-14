@@ -143,3 +143,69 @@ class TestPrecoolPreheatReasons:
         """Dew-point limit (and the other dominant constraints) outrank pre-cooling."""
         d = _record(hass, mock_config_entry, cooling_limited="dew_point")
         assert d["reason"] == "dew_point_limited"
+
+
+class TestCoastingReason:
+    """Idle outside the active band while the MPC plans = deliberate coasting."""
+
+    def test_coasting_above_cool_target(self, hass, mock_config_entry):
+        """Idle at 27.2 > cool 26.5 with an active MPC plan → coasting on stored cold."""
+        d = _record(hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=27.2)
+        assert d["reason"] == "mpc_coasting"
+
+    def test_coasting_below_heat_target(self, hass, mock_config_entry):
+        """Mirror: idle at 22.0 < heat 23.0 → coasting on stored heat."""
+        d = _record(hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=22.0)
+        assert d["reason"] == "mpc_coasting"
+
+    def test_idle_inside_band_stays_plan_idle(self, hass, mock_config_entry):
+        """In the deadband there is no drift being tolerated — plain mpc_plan_idle."""
+        d = _record(hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=25.3)
+        assert d["reason"] == "mpc_plan_idle"
+
+    def test_no_coasting_without_mpc(self, hass, mock_config_entry):
+        """Bang-bang idle above target (hysteresis) is not MPC coasting."""
+        d = _record(
+            hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=27.2, mpc_active=False
+        )
+        assert d["reason"] == "in_deadband"
+
+    def test_no_coasting_when_direction_incapable(self, hass, mock_config_entry):
+        """Above the cool target without cooling capability is not coasting."""
+        d = _record(
+            hass,
+            mock_config_entry,
+            mode="idle",
+            power_fraction=0.0,
+            current_temp=27.2,
+            can_cool=False,
+            targets=TargetTemps(heat=23.0, cool=None),
+        )
+        assert d["reason"] == "mpc_plan_idle"
+
+    def test_unknown_temp_stays_plan_idle(self, hass, mock_config_entry):
+        d = _record(hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=None)
+        assert d["reason"] == "mpc_plan_idle"
+
+    def test_dominant_constraints_win_over_coasting(self, hass, mock_config_entry):
+        """window_open / dew-point etc. still outrank the coasting label."""
+        d = _record(
+            hass, mock_config_entry, mode="idle", power_fraction=0.0, current_temp=27.2, window_open=True
+        )
+        assert d["reason"] == "window_open"
+        d = _record(
+            hass,
+            mock_config_entry,
+            mode="idle",
+            power_fraction=0.0,
+            current_temp=27.2,
+            cooling_limited="dew_point",
+        )
+        assert d["reason"] == "dew_point_limited"
+
+    def test_active_cooling_unaffected(self, hass, mock_config_entry):
+        """The v1.8.1 precooling/above-target chain for ACTIVE modes is untouched."""
+        d = _record(hass, mock_config_entry, current_temp=27.2)  # mode="cooling" default
+        assert d["reason"] == "above_cool_target"
+        d = _record(hass, mock_config_entry, current_temp=25.3)
+        assert d["reason"] == "mpc_precooling"

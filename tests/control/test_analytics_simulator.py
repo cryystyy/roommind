@@ -1021,3 +1021,84 @@ def test_analytics_simulator_ufh_shows_preheat():
     assert avg_ufh > avg_empty, (
         f"UFH avg temp {avg_ufh:.3f} should exceed empty-type avg {avg_empty:.3f} — UFH pre-heats, empty type waits"
     )
+
+
+# ---------------------------------------------------------------------------
+# Signed cold residual in the analytics prediction (coast-down drift)
+# ---------------------------------------------------------------------------
+
+
+class TestColdResidualPrediction:
+    """A seeded negative residual must show up as downward drift, not a flat line."""
+
+    @staticmethod
+    def _cool_room_config():
+        return {
+            "thermostats": [],
+            "acs": ["climate.ac"],
+            "devices": [{"entity_id": "climate.ac", "type": "ac", "role": "auto", "heating_system_type": "tabs"}],
+            "climate_mode": "auto",
+        }
+
+    def test_mpc_prediction_drifts_down_on_stored_cold(self):
+        """Idle horizon (in deadband): cold seed pulls the line down; no seed = flat."""
+        model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=1.0, Q_solar=0.0)
+        target_forecast = [{"target_temp": 26.5, "heat_target": 20.0, "cool_target": 26.5}] * 24
+        outdoor_series = [25.5] * 24  # T_out == T_room isolates the residual
+        settings = {"comfort_weight": 70}
+
+        with_cold = _simulate_mpc(
+            model,
+            target_forecast,
+            outdoor_series,
+            current_temp=25.5,
+            room_config=self._cool_room_config(),
+            settings=settings,
+            q_residual=-0.5,
+            heating_system_type="tabs",
+            last_power_fraction=1.0,
+        )
+        without = _simulate_mpc(
+            model,
+            target_forecast,
+            outdoor_series,
+            current_temp=25.5,
+            room_config=self._cool_room_config(),
+            settings=settings,
+            heating_system_type="tabs",
+        )
+
+        assert without[-1] == pytest.approx(25.5, abs=0.05), "no residual → flat line"
+        assert with_cold[-1] < with_cold[0], "stored cold must drift the prediction down"
+        assert with_cold[-1] < 25.5 - 0.15
+        assert all(w <= n for w, n in zip(with_cold, without, strict=True))
+
+    def test_bangbang_prediction_drifts_down_on_stored_cold(self):
+        """Same coast-down drift on the bang-bang fallback path."""
+        model = RCModel(C=1.0, U=0.05, Q_heat=0.8, Q_cool=1.0, Q_solar=0.0)
+        target_forecast = [{"target_temp": 26.5, "heat_target": 20.0, "cool_target": 26.5}] * 24
+        outdoor_series = [25.5] * 24
+
+        with_cold = _simulate_bangbang(
+            model,
+            target_forecast,
+            outdoor_series,
+            current_temp=25.5,
+            room_config=self._cool_room_config(),
+            all_points=[],
+            q_residual=-0.5,
+            heating_system_type="tabs",
+            last_power_fraction=1.0,
+        )
+        without = _simulate_bangbang(
+            model,
+            target_forecast,
+            outdoor_series,
+            current_temp=25.5,
+            room_config=self._cool_room_config(),
+            all_points=[],
+            heating_system_type="tabs",
+        )
+
+        assert without[-1] == pytest.approx(25.5, abs=0.05)
+        assert with_cold[-1] < 25.5 - 0.15

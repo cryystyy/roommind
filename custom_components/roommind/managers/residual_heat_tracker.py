@@ -10,19 +10,22 @@ from ..control.residual_heat import compute_residual_heat
 
 # Cooling ("cold charge") state is cleared once it is unquestionably stale.
 # Unlike heating state, which is cleared when the coordinator-computed
-# q_residual reaches 0.0, update() has no cold-residual input, so staleness
-# is derived from elapsed time using the slowest profile: after 5 tau the
-# stored charge has decayed to exp(-5) ~ 0.7 %, below anything
-# get_charge_fraction can meaningfully display.
+# q_residual reaches 0.0, cooling staleness is derived from elapsed time
+# using the slowest profile: after 5 tau the stored charge has decayed to
+# exp(-5) ~ 0.7 %, below anything get_charge_fraction can meaningfully
+# display.  (The signed q_residual passed to update() is not used for
+# cooling cleanup: it reads 0.0 when the cold_residual_enabled gate is off
+# or when heating state is more recent, neither of which means the cold
+# charge is stale.)
 _COOL_STATE_MAX_AGE_MINUTES = 5.0 * max(p["tau_minutes"] for p in HEATING_SYSTEM_PROFILES.values())
 
 
 class ResidualHeatTracker:
     """Tracks heating and cooling on/off transitions per room.
 
-    Heating transitions feed the residual-heat model (``get_q_residual``)
-    and the thermal-mass state of charge; cooling transitions feed the
-    state of charge only ("cold charge", see ``get_charge_fraction``).
+    Heating and cooling transitions both feed the signed residual model
+    (``get_q_residual``: positive = stored heat, negative = stored cold)
+    and the thermal-mass state of charge (``get_charge_fraction``).
     """
 
     def __init__(self) -> None:
@@ -35,27 +38,43 @@ class ResidualHeatTracker:
         self._cool_on_since: dict[str, float] = {}
 
     def get_q_residual(self, area_id: str, system_type: str, previous_mode: str) -> float:
-        """Compute residual heat from previous cycle state.
+        """Compute the signed residual fraction from previous cycle state.
 
-        Heating-only by design: a cold residual would need a sign
-        convention in the EKF/optimizer, so cooling transitions do not
-        contribute here (they only affect ``get_charge_fraction``).
+        Positive = residual heat after a heating run (fraction of the
+        heating rate, unchanged legacy semantics); negative = residual
+        cold after a cooling run (fraction of the cooling rate).  Each
+        direction is suppressed while its own mode is still commanded
+        (``previous_mode``); when residual state exists for both
+        directions (season change), the direction with the more recent
+        off-transition wins — the same rule as ``get_charge_fraction``.
         """
-        if not system_type or area_id not in self._off_since or previous_mode == MODE_HEATING:
+        if not system_type:
             return 0.0
-        elapsed = (time.time() - self._off_since[area_id]) / 60.0
-        heat_dur = (self._off_since[area_id] - self._on_since.get(area_id, self._off_since[area_id])) / 60.0
-        last_pf = self._off_power.get(area_id, 1.0)
-        return compute_residual_heat(elapsed, system_type, last_pf, heat_dur)
+        heat_off = self._off_since.get(area_id) if previous_mode != MODE_HEATING else None
+        cool_off = self._cool_off_since.get(area_id) if previous_mode != MODE_COOLING else None
+        now = time.time()
+        if heat_off is not None and (cool_off is None or heat_off >= cool_off):
+            elapsed = (now - heat_off) / 60.0
+            heat_dur = (heat_off - self._on_since.get(area_id, heat_off)) / 60.0
+            last_pf = self._off_power.get(area_id, 1.0)
+            return compute_residual_heat(elapsed, system_type, last_pf, heat_dur)
+        if cool_off is not None:
+            elapsed = (now - cool_off) / 60.0
+            cool_dur = (cool_off - self._cool_on_since.get(area_id, cool_off)) / 60.0
+            last_pf = self._cool_off_power.get(area_id, 1.0)
+            return -compute_residual_heat(elapsed, system_type, last_pf, cool_dur)
+        return 0.0
 
     def update(
         self, area_id: str, mode: str, power_fraction: float, previous_mode: str, q_residual: float = 0.0
     ) -> None:
         """Update heating and cooling transition state based on current mode.
 
-        Heating state is cleared once the (coordinator-computed)
-        ``q_residual`` has decayed to 0.0; cooling state has no residual
-        input, so it is cleared once older than ``_COOL_STATE_MAX_AGE_MINUTES``.
+        ``q_residual`` must be the raw (ungated) signed value from
+        ``get_q_residual``.  Heating state is cleared once it has decayed
+        to 0.0; a negative value (residual cold more recent) keeps heating
+        state as-is.  Cooling state is cleared once older than
+        ``_COOL_STATE_MAX_AGE_MINUTES``.
         """
         if mode == MODE_HEATING:
             self._off_since.pop(area_id, None)
