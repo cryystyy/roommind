@@ -1498,6 +1498,8 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         commanded_mode: str,
         targets: TargetTemps,
         current_temp: float | None,
+        can_heat: bool | None = None,
+        can_cool: bool | None = None,
     ) -> str:
         """Display-only: is the room oriented to cooling or heating?
 
@@ -1516,6 +1518,13 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         if commanded_mode == MODE_COOLING:
             return "cooling"
         if commanded_mode == MODE_HEATING:
+            return "heating"
+        # Device capability beats the outdoor heuristic: a room whose devices
+        # can only cool right now (e.g. Rehau TABS zones expose [off, cool]
+        # in summer) can never be oriented to heating, and vice versa.
+        if can_cool and not can_heat:
+            return "cooling"
+        if can_heat and not can_cool:
             return "heating"
         # Auto + idle: infer the season from outdoor temp relative to the
         # targets, else from where the room sits between them.
@@ -1582,7 +1591,15 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         _devs_with_eid = [d for d in _room_devices if d.get("entity_id")]
         _all_direct = bool(_devs_with_eid) and len(_direct_eids) == len(_devs_with_eid)
 
-        _direction = self._resolve_display_direction(room, display_mode, mode, targets, current_temp)
+        _direction = self._resolve_display_direction(
+            room,
+            display_mode,
+            mode,
+            targets,
+            current_temp,
+            can_heat=bool((decision or {}).get("can_heat")),
+            can_cool=bool((decision or {}).get("can_cool")),
+        )
 
         return {
             "area_id": area_id,
