@@ -1212,9 +1212,30 @@ class RoomMindCoordinator(DataUpdateCoordinator):
         elif cooling_limited:
             reason = "dew_point_limited"
         elif mode == MODE_HEATING:
-            reason = "below_heat_target"
+            # MPC may heat ahead of a scheduled setpoint rise while the room
+            # is still at/above the current heat target (pre-heating) — the
+            # bang-bang fallback never commands heating at/above target.
+            if (
+                mpc_active
+                and current_temp is not None
+                and targets.heat is not None
+                and current_temp >= targets.heat
+            ):
+                reason = "mpc_preheating"
+            else:
+                reason = "below_heat_target"
         elif mode == MODE_COOLING:
-            reason = "above_cool_target"
+            # Mirror image: MPC pre-cools toward an upcoming lower cool
+            # target while the room is still at/below the current one.
+            if (
+                mpc_active
+                and current_temp is not None
+                and targets.cool is not None
+                and current_temp <= targets.cool
+            ):
+                reason = "mpc_precooling"
+            else:
+                reason = "above_cool_target"
         elif not can_heat and not can_cool:
             reason = "no_capable_device"
         elif mpc_active:

@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.roommind.const import TargetTemps
+
 from .conftest import (
     SAMPLE_ROOM,
     _create_coordinator,
@@ -76,3 +78,68 @@ class TestDecisionTrace:
         for _ in range(5):
             await coordinator._async_update_data()
         assert len(coordinator._decision_traces[room["area_id"]]) == 1
+
+
+def _record(hass, mock_config_entry, **overrides):
+    """Call _record_decision directly with sane cooling-season defaults."""
+    hass.states.get = MagicMock(side_effect=make_mock_states_get())
+    coordinator = _create_coordinator(hass, mock_config_entry)
+    kwargs = dict(
+        area_id=SAMPLE_ROOM["area_id"],
+        room=SAMPLE_ROOM,
+        settings={},
+        targets=TargetTemps(heat=23.0, cool=26.5),
+        mode="cooling",
+        power_fraction=0.4,
+        current_temp=25.3,
+        can_heat=True,
+        can_cool=True,
+        mpc_active=True,
+        window_open=False,
+        force_off=False,
+        presence_away=False,
+        climate_active=True,
+        waiting_for_data=False,
+        cooling_limited="",
+        feels_like_delta=0.0,
+    )
+    kwargs.update(overrides)
+    return coordinator._record_decision(**kwargs)
+
+
+class TestPrecoolPreheatReasons:
+    """MPC pre-conditioning must not be mislabeled as above/below target."""
+
+    def test_mpc_precooling_at_or_below_cool_target(self, hass, mock_config_entry):
+        """MPC cooling a room already below the cool target = pre-cooling."""
+        d = _record(hass, mock_config_entry)  # 25.3 <= 26.5, MPC active
+        assert d["reason"] == "mpc_precooling"
+        # Boundary: exactly at target still counts as pre-cooling
+        d = _record(hass, mock_config_entry, current_temp=26.5)
+        assert d["reason"] == "mpc_precooling"
+
+    def test_above_cool_target_when_actually_above(self, hass, mock_config_entry):
+        d = _record(hass, mock_config_entry, current_temp=27.2)
+        assert d["reason"] == "above_cool_target"
+
+    def test_bangbang_cooling_keeps_legacy_reason(self, hass, mock_config_entry):
+        """Without MPC (bang-bang / min-run hold) the legacy reason is kept."""
+        d = _record(hass, mock_config_entry, mpc_active=False)
+        assert d["reason"] == "above_cool_target"
+
+    def test_unknown_temp_keeps_legacy_reason(self, hass, mock_config_entry):
+        d = _record(hass, mock_config_entry, current_temp=None)
+        assert d["reason"] == "above_cool_target"
+
+    def test_mpc_preheating_at_or_above_heat_target(self, hass, mock_config_entry):
+        d = _record(hass, mock_config_entry, mode="heating", current_temp=23.4)
+        assert d["reason"] == "mpc_preheating"
+
+    def test_below_heat_target_when_actually_below(self, hass, mock_config_entry):
+        d = _record(hass, mock_config_entry, mode="heating", current_temp=21.0)
+        assert d["reason"] == "below_heat_target"
+
+    def test_dominant_constraints_win_over_precooling(self, hass, mock_config_entry):
+        """Dew-point limit (and the other dominant constraints) outrank pre-cooling."""
+        d = _record(hass, mock_config_entry, cooling_limited="dew_point")
+        assert d["reason"] == "dew_point_limited"

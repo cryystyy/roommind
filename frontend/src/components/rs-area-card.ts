@@ -246,6 +246,19 @@ export class RsAreaCard extends LitElement {
         background: rgba(76, 175, 80, 0.12);
       }
 
+      .shadow-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        padding: 2px 8px 2px 6px;
+        border-radius: 10px;
+        --mdc-icon-size: 14px;
+        color: var(--warning-color, #ffa726);
+        border: 1px solid var(--warning-color, #ffa726);
+      }
+
       .badge-row {
         display: flex;
         gap: 6px;
@@ -503,6 +516,12 @@ export class RsAreaCard extends LitElement {
                   : localize("card.mpc_learning", this.hass.language)}
               </span>`
             : nothing}
+          ${this.config?.shadow_mode
+            ? html`<span class="shadow-badge">
+                <ha-icon icon="mdi:eye-outline"></ha-icon>
+                ${localize("room.shadow_badge", this.hass.language)}
+              </span>`
+            : nothing}
         </span>
       </div>
       ${!this.climateControlActive || this.config?.climate_control_enabled === false
@@ -516,24 +535,41 @@ export class RsAreaCard extends LitElement {
   private _renderTargetInfo(live: NonNullable<RoomConfig["live"]>) {
     if (live.target_temp === null && live.heat_target === null) return nothing;
 
-    // Show range for auto mode with different heat/cool targets
     const climateMode = this.config?.climate_mode ?? "auto";
+    // Active direction: an actively heating/cooling mode wins; otherwise use
+    // the backend-reported orientation (covers idle/standby in Auto).
+    const dir = live.mode === "cooling" || live.mode === "heating" ? live.mode : live.direction;
+    // In Auto, headline the target for the active direction so we never show
+    // the opposite-season setpoint as "the target".
+    const dirTarget =
+      climateMode === "auto" && dir === "cooling"
+        ? (live.cool_target ?? live.target_temp)
+        : climateMode === "auto" && dir === "heating"
+          ? (live.heat_target ?? live.target_temp)
+          : null;
+    // Show the heat/cool range only when the direction is genuinely unknown
     const showRange =
+      dirTarget == null &&
       climateMode === "auto" &&
       live.heat_target != null &&
       live.cool_target != null &&
       live.heat_target !== live.cool_target;
 
-    const targetDisplay = showRange
-      ? html`<span class="target-value"
-          >${formatTemp(live.heat_target!, this.hass)} –
-          ${formatTemp(live.cool_target!, this.hass)}${tempUnit(this.hass)}</span
-        >`
-      : html`<span class="target-value"
-          >${formatTemp((live.target_temp ?? live.heat_target)!, this.hass)}${tempUnit(
-            this.hass,
-          )}</span
-        >`;
+    const targetDisplay =
+      dirTarget != null
+        ? html`<span class="target-value"
+            >${formatTemp(dirTarget, this.hass)}${tempUnit(this.hass)}</span
+          >`
+        : showRange
+          ? html`<span class="target-value"
+              >${formatTemp(live.heat_target!, this.hass)} –
+              ${formatTemp(live.cool_target!, this.hass)}${tempUnit(this.hass)}</span
+            >`
+          : html`<span class="target-value"
+              >${formatTemp((live.target_temp ?? live.heat_target)!, this.hass)}${tempUnit(
+                this.hass,
+              )}</span
+            >`;
 
     return html`
       <span class="target-info">

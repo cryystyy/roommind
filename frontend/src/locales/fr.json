@@ -534,6 +534,8 @@
   "decision.above_cool_target": "Au-dessus de la cible de refroidissement",
   "decision.no_capable_device": "Aucun appareil compatible",
   "decision.mpc_plan_idle": "MPC prévoit l'inactivité",
+  "decision.mpc_precooling": "Pré-refroidissement pour la consigne à venir",
+  "decision.mpc_preheating": "Préchauffage pour la consigne à venir",
   "decision.in_deadband": "Dans la zone de confort",
   "decision.src_override": "manuel",
   "decision.src_vacation": "vacances",

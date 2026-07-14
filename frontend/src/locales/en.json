@@ -534,6 +534,8 @@
   "decision.above_cool_target": "Above cool target",
   "decision.no_capable_device": "No capable device",
   "decision.mpc_plan_idle": "MPC plans idle",
+  "decision.mpc_precooling": "Pre-cooling for upcoming target",
+  "decision.mpc_preheating": "Pre-heating for upcoming target",
   "decision.in_deadband": "In comfort band",
   "decision.src_override": "override",
   "decision.src_vacation": "vacation",

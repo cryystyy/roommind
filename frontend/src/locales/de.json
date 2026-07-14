@@ -534,6 +534,8 @@
   "decision.above_cool_target": "Über Kühlziel",
   "decision.no_capable_device": "Kein geeignetes Gerät",
   "decision.mpc_plan_idle": "MPC plant Leerlauf",
+  "decision.mpc_precooling": "Vorkühlen für kommendes Ziel",
+  "decision.mpc_preheating": "Vorheizen für kommendes Ziel",
   "decision.in_deadband": "Im Komfortband",
   "decision.src_override": "Manuell",
   "decision.src_vacation": "Urlaub",
